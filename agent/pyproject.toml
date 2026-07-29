@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fabric-agent"
+version = "0.1.0"
+description = "Fabric Windows agent"
+requires-python = ">=3.12"
+dependencies = [
+  "websockets>=13.0,<15.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.11",
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "ruff>=0.6",
+]
+
+[tool.setuptools]
+packages = [
+  "fabric_agent",
+  "fabric_agent.application",
+  "fabric_agent.domain",
+  "fabric_agent.infrastructure",
+  "fabric_agent.transport",
+  "fabric_agent.providers",
+  "fabric_agent.providers.claude_code_local",
+  "fabric_agent.providers.echo",
+  "fabric_agent.providers.windows_powershell",
+]
+
+[tool.pytest.ini_options]
+python_files = ["tests.py", "test_*.py", "*_tests.py"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = [".."]

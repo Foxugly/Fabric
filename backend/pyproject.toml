@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fabric-backend"
+version = "0.1.0"
+description = "Fabric backend"
+requires-python = ">=3.12"
+dependencies = [
+  "Django>=5.1,<5.3",
+  "django-cors-headers>=4.6,<5.0",
+  "djangorestframework>=3.15,<4.0",
+  "channels>=4.1,<5.0",
+  "channels-redis>=4.2,<5.0",
+  "psycopg[binary]>=3.2,<4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "daphne>=4.1,<5.0",
+  "django-stubs[compatible-mypy]>=5.1",
+  "djangorestframework-stubs>=3.16",
+  "mypy>=1.11",
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "pytest-django>=4.9",
+  "ruff>=0.6",
+]
+
+[tool.setuptools]
+packages = [
+  "config",
+  "apps",
+  "apps.agents",
+  "apps.api_auth",
+  "apps.commands",
+  "apps.conversations",
+  "apps.providers",
+  "apps.audit",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["tests.py", "test_*.py", "*_tests.py"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+exclude = ["apps/*/migrations/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "DJ"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+strict = true
+exclude = ["migrations/"]
+mypy_path = [".."]
+disallow_subclassing_any = false
+ignore_missing_imports = true
+warn_return_any = false
+disallow_untyped_decorators = false
+
+[[tool.mypy.overrides]]
+module = ["channels.*"]
+ignore_missing_imports = true
+
+[tool.django-stubs]
+django_settings_module = "config.settings"
