@@ -153,7 +153,31 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
             return
         agent = Agent.objects.get(id=self.agent.id)
         agent.mark_offline()
+        self._fail_in_flight_commands(agent)
         publish_agent_updated(agent)
+
+    @staticmethod
+    def _fail_in_flight_commands(agent: Agent) -> None:
+        """Nothing will ever report on these again: don't leave them running."""
+        in_flight = list(
+            Command.objects.filter(
+                agent=agent,
+                status__in=[
+                    CommandStatus.DISPATCHED,
+                    CommandStatus.RUNNING,
+                    CommandStatus.WAITING_USER_ACTION,
+                ],
+            )
+        )
+        for command in in_flight:
+            command.status = CommandStatus.FAILED
+            command.error = "Agent disconnected before the command completed"
+            command.finished_at = timezone.now()
+            command.save(
+                update_fields=["status", "error", "finished_at", "updated_at"]
+            )
+            sync_message_for_command_failed(command)
+            publish_command_updated(command)
 
     def _touch_agent(self) -> None:
         if self.agent is None:

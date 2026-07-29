@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from fabric_agent.domain.provider import Provider
@@ -30,7 +30,7 @@ class EchoProvider(Provider):
         self,
         action: str,
         payload: dict[str, Any],
-    ) -> AsyncIterator[dict[str, Any]]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         text = str(payload.get("text", ""))
         rendered = f"Echo: {text}"
         buffer = ""

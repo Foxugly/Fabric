@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import platform
 from dataclasses import dataclass
 from typing import Any
@@ -30,6 +31,9 @@ class CommandCancelledError(RuntimeError):
     pass
 
 
+LOGGER = logging.getLogger(__name__)
+
+
 class AgentWebSocketClient:
     def __init__(
         self,
@@ -46,9 +50,17 @@ class AgentWebSocketClient:
         backoff = 1
         while True:
             try:
+                LOGGER.info("Connecting to %s", self._config.server_ws_url)
                 await self._run_once()
+                LOGGER.info("Connection closed, reconnecting")
                 backoff = 1
-            except Exception:
+            except Exception as exc:
+                LOGGER.warning(
+                    "Agent connection failed (%s), retrying in %ss",
+                    exc,
+                    backoff,
+                    exc_info=LOGGER.isEnabledFor(logging.DEBUG),
+                )
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 15)
 
@@ -146,6 +158,9 @@ class AgentWebSocketClient:
 
         execution_parameters = dict(parameters)
         execution_parameters["_fabric_command_id"] = command_id
+        timeout_seconds = payload.get("timeout_seconds")
+        if isinstance(timeout_seconds, int) and timeout_seconds > 0:
+            execution_parameters["_fabric_timeout_seconds"] = timeout_seconds
 
         await self._send_message(
             websocket,
@@ -190,16 +205,20 @@ class AgentWebSocketClient:
 
         try:
             last_snapshot = ""
-            async for progress in self._dispatcher.stream(
-                provider_name, action, parameters
-            ):
-                last_snapshot = str(progress.get("snapshot", last_snapshot))
-                await self._send_message(
-                    websocket,
-                    "command.progress",
-                    correlation_id,
-                    {"command_id": command_id, **progress},
-                )
+            # `aclosing` finalises the provider generator if this task is
+            # cancelled or the socket dies mid-stream, so session locks and
+            # child processes are always released.
+            async with contextlib.aclosing(
+                self._dispatcher.stream(provider_name, action, parameters)
+            ) as progress_events:
+                async for progress in progress_events:
+                    last_snapshot = str(progress.get("snapshot", last_snapshot))
+                    await self._send_message(
+                        websocket,
+                        "command.progress",
+                        correlation_id,
+                        {"command_id": command_id, **progress},
+                    )
 
             result = await self._dispatcher.execute(provider_name, action, parameters)
             if "text" not in result and last_snapshot:
@@ -235,6 +254,14 @@ class AgentWebSocketClient:
             )
             raise
         except Exception as exc:
+            LOGGER.warning(
+                "Command %s (%s %s) failed: %s",
+                command_id,
+                provider_name,
+                action,
+                exc,
+                exc_info=LOGGER.isEnabledFor(logging.DEBUG),
+            )
             await self._send_message(
                 websocket,
                 "command.failed",
@@ -259,6 +286,10 @@ class AgentWebSocketClient:
                 active.action,
                 active.payload,
             )
+        except NotImplementedError:
+            # A provider without cooperative cancellation still gets its task
+            # cancelled below; it must never take the whole socket down.
+            pass
         finally:
             active.task.cancel()
 

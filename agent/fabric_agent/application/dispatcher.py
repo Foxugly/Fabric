@@ -1,9 +1,23 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import contextlib
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from fabric_agent.application.registry import ProviderRegistry
+
+
+def local_action(provider_name: str, action: str) -> str:
+    """Strip the provider namespace used on the wire (`echo.message.send`).
+
+    Fabric commands are fully qualified end to end (API, database, protocol) so
+    that a flat action list stays unambiguous. Providers only ever see their own
+    unqualified action (`message.send`).
+    """
+    prefix = f"{provider_name}."
+    if action.startswith(prefix):
+        return action[len(prefix) :]
+    return action
 
 
 class CommandDispatcher:
@@ -17,7 +31,7 @@ class CommandDispatcher:
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         provider = self._registry.get(provider_name)
-        return await provider.execute(action, payload)
+        return await provider.execute(local_action(provider_name, action), payload)
 
     async def cancel(
         self,
@@ -26,21 +40,24 @@ class CommandDispatcher:
         payload: dict[str, Any],
     ) -> None:
         provider = self._registry.get(provider_name)
-        await provider.cancel(action, payload)
+        await provider.cancel(local_action(provider_name, action), payload)
 
     async def stream(
         self,
         provider_name: str,
         action: str,
         payload: dict[str, Any],
-    ) -> AsyncIterator[dict[str, Any]]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         provider = self._registry.get(provider_name)
         try:
-            stream = provider.stream(action, payload)
+            stream = provider.stream(local_action(provider_name, action), payload)
         except NotImplementedError:
             return
+        # `aclosing` guarantees the provider generator is finalised even when the
+        # consumer stops early: providers hold session locks across yields.
         try:
-            async for event in stream:
-                yield event
+            async with contextlib.aclosing(stream) as events:
+                async for event in events:
+                    yield event
         except NotImplementedError:
             return

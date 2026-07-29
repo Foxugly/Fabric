@@ -1,10 +1,14 @@
 # Quickstart
 
-Ce quickstart valide la première livraison technique avec le provider factice `echo`.
+Ce quickstart monte la chaîne complète et la valide avec le provider `echo`,
+puis avec le vrai provider `claude_code_local`.
 
-Le provider cible métier pour la suite du projet est `claude_code_local`, documenté dans [docs/claude-code-local-mvp.md](/C:/Users/rvilain/PycharmProjects/Fabric/docs/claude-code-local-mvp.md). Il n'est pas encore implémenté à ce stade.
+- cadrage produit : [claude-code-local-mvp.md](claude-code-local-mvp.md)
+- usage au quotidien : [claude-in-the-terminal.md](claude-in-the-terminal.md)
+- smoke test Claude réel : [claude-code-local-smoke-test.md](claude-code-local-smoke-test.md)
 
-Le smoke test réel pour `claude_code_local` est documenté dans [docs/claude-code-local-smoke-test.md](/C:/Users/rvilain/PycharmProjects/Fabric/docs/claude-code-local-smoke-test.md).
+Le plus simple sous Windows reste `run-fabric-dev.cmd` à la racine, qui fait
+les étapes 1 à 7 d'un coup. La procédure manuelle ci-dessous sert de référence.
 
 ## 1. Lancer l'infrastructure
 
@@ -101,3 +105,17 @@ curl http://127.0.0.1:8000/api/v1/commands/<command_id>/ ^
 ```
 
 Le statut doit évoluer `pending -> dispatched -> running -> succeeded`, et les `events` doivent contenir les deltas de progression.
+
+## 11. Envoyer un vrai tour Claude Code
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/commands/ ^
+  -H "Content-Type: application/json" ^
+  -H "Authorization: Token <user_token>" ^
+  -d "{\"agent_id\":\"<agent_id>\",\"provider\":\"claude_code_local\",\"action\":\"claude_code_local.message.send\",\"timeout_seconds\":300,\"payload\":{\"text\":\"Reply with exactly: FABRIC_SMOKE_OK\",\"working_directory\":\"C:\\\\path\\\\to\\\\repo\",\"permission_mode\":\"plan\"}}"
+```
+
+`result.text` doit contenir `FABRIC_SMOKE_OK` et `result.session_id` l'identifiant
+à repasser dans le `payload` du tour suivant pour continuer la conversation.
+
+Depuis l'interface, la même chose s'écrit `claude Reply with exactly: FABRIC_SMOKE_OK`.

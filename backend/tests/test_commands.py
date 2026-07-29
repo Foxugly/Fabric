@@ -646,3 +646,63 @@ async def test_cancel_running_command_marks_it_cancelled() -> None:
     assert command.status == CommandStatus.CANCELLED
 
     await communicator.disconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_agent_disconnect_fails_in_flight_commands() -> None:
+    agent = await Agent.objects.acreate(name="agent")
+    token = await sync_to_async(agent.issue_development_token)()
+    communicator = WebsocketCommunicator(
+        application,
+        f"/ws/v1/agent/?agent_id={agent.id}&token={token}",
+    )
+    connected, _ = await communicator.connect()
+    assert connected is True
+    await communicator.receive_json_from()
+
+    await communicator.send_json_to(
+        build_message(
+            message_type="agent.hello",
+            correlation_id=str(agent.id),
+            payload={"version": "0.1.0", "operating_system": "Windows"},
+        )
+    )
+
+    from django.contrib.auth import get_user_model
+
+    user_model = get_user_model()
+    user = await user_model.objects.acreate_user(
+        username="disconnect-user",
+        password="disconnect-password",
+    )
+    client = APIClient()
+    client.force_authenticate(user=user)
+    response = await sync_to_async(client.post)(
+        "/api/v1/commands/",
+        {
+            "agent_id": str(agent.id),
+            "provider": "claude_code_local",
+            "action": "claude_code_local.message.send",
+            "payload": {"text": "hello"},
+        },
+        format="json",
+    )
+    assert response.status_code == 201
+    command_id = response.json()["id"]
+
+    outbound = await communicator.receive_json_from()
+    assert outbound["type"] == "command.request"
+
+    await communicator.disconnect()
+
+    command: Command | None = None
+    for _ in range(20):
+        command = await Command.objects.aget(id=command_id)
+        if command.status == CommandStatus.FAILED:
+            break
+        await asyncio.sleep(0.05)
+
+    assert command is not None
+    assert command.status == CommandStatus.FAILED
+    assert "disconnected" in command.error

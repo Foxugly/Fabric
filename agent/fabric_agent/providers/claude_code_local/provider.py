@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from fabric_agent.domain.provider import Provider
@@ -16,10 +15,11 @@ from fabric_agent.providers.claude_code_local.executor import (
 from fabric_agent.providers.claude_code_local.models import (
     ClaudeCodeLocalCapabilities,
 )
+from fabric_agent.providers.claude_code_local.runner import ClaudeCodeExecutionResult
 
 
 class ClaudeCodeLocalProvider(Provider):
-    """Future provider for a user-owned local Claude Code session."""
+    """Drives a user-owned local Claude Code session through the CLI."""
 
     name = "claude_code_local"
 
@@ -44,7 +44,7 @@ class ClaudeCodeLocalProvider(Provider):
         return self._status_detector.detect().to_dict()
 
     async def get_capabilities(self) -> list[str]:
-        return list(self._capabilities.capabilities)
+        return list(self._capabilities.qualified_capabilities())
 
     async def execute(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         if action == "session.status":
@@ -52,21 +52,25 @@ class ClaudeCodeLocalProvider(Provider):
         if action != "message.send":
             raise NotImplementedError(f"Unsupported claude_code_local action: {action}")
 
-        cache_key = self._cache_key(action, payload)
-        session_lock = self._lock_for_payload(payload)
-        async with session_lock:
-            cached_result = self._result_cache.pop(cache_key, None)
-            if cached_result is not None:
-                return cached_result
+        cached_result = self._result_cache.pop(self._cache_key(payload), None)
+        if cached_result is not None:
+            return cached_result
 
+        async with self._lock_for_payload(payload):
             result = await self._message_executor.execute(payload)
             return build_result_payload(result)
+
+    async def cancel(self, action: str, payload: dict[str, Any]) -> None:
+        if action != "message.send":
+            raise NotImplementedError(f"Unsupported claude_code_local action: {action}")
+        self._result_cache.pop(self._cache_key(payload), None)
+        await self._message_executor.cancel(payload)
 
     def stream(
         self,
         action: str,
         payload: dict[str, Any],
-    ) -> AsyncIterator[dict[str, Any]]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         if action != "message.send":
             raise NotImplementedError(f"Unsupported claude_code_local action: {action}")
         return self._stream_message_send(payload)
@@ -74,19 +78,21 @@ class ClaudeCodeLocalProvider(Provider):
     async def _stream_message_send(
         self,
         payload: dict[str, Any],
-    ) -> AsyncIterator[dict[str, Any]]:
-        session_lock = self._lock_for_payload(payload)
-        async with session_lock:
-            deltas, result = await self._message_executor.stream(payload)
-            for delta in deltas:
-                yield delta.to_progress_event()
-            self._result_cache[self._cache_key("message.send", payload)] = (
-                build_result_payload(result)
-            )
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        async with self._lock_for_payload(payload):
+            async for chunk in self._message_executor.stream(payload):
+                if isinstance(chunk, ClaudeCodeExecutionResult):
+                    self._result_cache[self._cache_key(payload)] = build_result_payload(
+                        chunk
+                    )
+                    continue
+                yield chunk.to_progress_event()
 
-    def _cache_key(self, action: str, payload: dict[str, Any]) -> str:
-        canonical_payload = json.dumps(payload, sort_keys=True)
-        return f"{action}:{canonical_payload}"
+    def _cache_key(self, payload: dict[str, Any]) -> str:
+        command_id = payload.get("_fabric_command_id")
+        if isinstance(command_id, str) and command_id:
+            return f"command:{command_id}"
+        return f"session:{self._session_key(payload)}"
 
     def _lock_for_payload(self, payload: dict[str, Any]) -> asyncio.Lock:
         session_key = self._session_key(payload)

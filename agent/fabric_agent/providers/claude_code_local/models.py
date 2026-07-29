@@ -47,8 +47,12 @@ class ClaudeCodeLocalCapabilities:
         "message.cancel",
     )
 
+    def qualified_capabilities(self) -> tuple[str, ...]:
+        """Capabilities as advertised on the wire: `<provider>.<action>`."""
+        return tuple(f"{self.provider}.{action}" for action in self.capabilities)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "provider": self.provider,
-            "capabilities": list(self.capabilities),
+            "capabilities": list(self.qualified_capabilities()),
         }

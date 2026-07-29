@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import pytest
 
@@ -13,6 +14,7 @@ from fabric_agent.providers.claude_code_local.executor import (
 )
 from fabric_agent.providers.claude_code_local.runner import (
     ClaudeCodeExecutionResult,
+    StreamChunk,
     StreamDeltaEvent,
 )
 
@@ -39,7 +41,7 @@ class FakeMessageExecutor(ClaudeCodeMessageExecutor):
             installation_probe=StubInstallationProbe(Path("C:/Tools/claude.exe"))
         )
 
-    async def execute(self, payload: dict[str, object]) -> ClaudeCodeExecutionResult:
+    async def execute(self, payload: dict[str, Any]) -> ClaudeCodeExecutionResult:
         request = self._build_request(payload)
         return ClaudeCodeExecutionResult(
             text=f"Echo from Claude: {request.prompt}",
@@ -53,19 +55,15 @@ class FakeMessageExecutor(ClaudeCodeMessageExecutor):
 
     async def stream(
         self,
-        payload: dict[str, object],
-    ) -> tuple[list[StreamDeltaEvent], ClaudeCodeExecutionResult]:
+        payload: dict[str, Any],
+    ) -> AsyncGenerator[StreamChunk, None]:
         request = self._build_request(payload)
-        return (
-            [
-                StreamDeltaEvent(sequence=1, delta="Hello", snapshot="Hello"),
-                StreamDeltaEvent(sequence=2, delta=" world", snapshot="Hello world"),
-            ],
-            ClaudeCodeExecutionResult(
-                text="Hello world",
-                session_id=request.session_id or "session-123",
-                raw_payload={"result": "Hello world", "session_id": "session-123"},
-            ),
+        yield StreamDeltaEvent(sequence=1, delta="Hello", snapshot="Hello")
+        yield StreamDeltaEvent(sequence=2, delta=" world", snapshot="Hello world")
+        yield ClaudeCodeExecutionResult(
+            text="Hello world",
+            session_id=request.session_id or "session-123",
+            raw_payload={"result": "Hello world", "session_id": "session-123"},
         )
 
 
@@ -79,6 +77,35 @@ def test_message_executor_validates_payload() -> None:
 
     with pytest.raises(ClaudeCodePayloadError):
         executor._build_request({"text": "ok", "timeout_seconds": 0})
+
+    with pytest.raises(ClaudeCodePayloadError):
+        executor._build_request({"text": "ok", "permission_mode": "yolo"})
+
+    with pytest.raises(ClaudeCodePayloadError):
+        executor._build_request({"text": "ok", "allowed_tools": "Bash"})
+
+
+def test_message_executor_maps_claude_cli_options() -> None:
+    executor = ClaudeCodeMessageExecutor(
+        installation_probe=StubInstallationProbe(Path("C:/Tools/claude.exe"))
+    )
+
+    request = executor._build_request(
+        {
+            "text": "ship it",
+            "session_id": "session-123",
+            "permission_mode": "acceptEdits",
+            "model": "sonnet",
+            "allowed_tools": ["Bash(git *)", "Edit"],
+            "_fabric_timeout_seconds": 900,
+        }
+    )
+
+    assert request.session_id == "session-123"
+    assert request.permission_mode == "acceptEdits"
+    assert request.model == "sonnet"
+    assert request.allowed_tools == ("Bash(git *)", "Edit")
+    assert request.timeout_seconds == 900
 
 
 def test_build_result_payload_sanitizes_metadata() -> None:

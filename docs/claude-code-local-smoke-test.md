@@ -44,12 +44,12 @@ curl http://127.0.0.1:8000/api/v1/agents/
 Expected result:
 
 - the agent is `online`
-- `capabilities` contains:
-  - `session.status`
-  - `session.attach`
-  - `message.send`
-  - `message.stream`
-  - `message.cancel`
+- `capabilities` contains the fully qualified names:
+  - `claude_code_local.session.status`
+  - `claude_code_local.session.attach`
+  - `claude_code_local.message.send`
+  - `claude_code_local.message.stream`
+  - `claude_code_local.message.cancel`
 
 ## 4. Send `claude_code_local.session.status`
 
@@ -94,8 +94,32 @@ Expected result:
 - `result.text` contains `FABRIC_SMOKE_OK`
 - `result.session_id` is populated when Claude Code returns one
 
+## 6. Continue the same session
+
+Re-send step 5 with the `session_id` returned by the previous turn, and a prompt
+that only a continued conversation can answer:
+
+```json
+{"text": "What exact string did you just reply?", "session_id": "<session_id>"}
+```
+
+Expected result: the same string, and a `result.session_id` to carry forward.
+
+## 7. Cancel a running turn
+
+Start a long turn, then `POST /api/v1/commands/<command_id>/cancel/`.
+
+Expected result:
+
+- the command reaches `cancelled`
+- the `claude` child process is gone from the Windows machine
+- the agent stays `online` (cancellation must never drop the WebSocket)
+
 ## Notes
 
 - `claude_code_local.message.send` uses the Claude Code CLI, not transcript parsing.
 - transcript files are used only for conservative session detection.
 - direct transcript parsing should remain out of the execution path because the transcript format is internal and can change across Claude Code releases.
+- in `-p` mode Claude Code cannot prompt for permission: without an explicit
+  `permission_mode`, any tool that needs approval is denied. Use `plan` for a
+  read-only smoke test.

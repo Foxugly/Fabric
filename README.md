@@ -34,19 +34,29 @@ Points de cadrage :
 - le navigateur et l'onglet `Code` de Claude Web sont des surfaces possibles, mais pas la définition du système ;
 - le futur provider cible est `claude_code_local`.
 
-Cette première livraison implémente uniquement :
+## État actuel
 
-- le squelette du monorepo ;
-- le backend Django minimal ;
-- les modèles `Agent`, `Command` et `CommandEvent` ;
-- un protocole JSON versionné partagé ;
-- un WebSocket agent authentifié par token de développement ;
-- un agent Python minimal ;
-- un provider factice `echo` avec progression ;
-- les tests backend et agent ;
-- la documentation de lancement local.
+Implémenté et vérifié de bout en bout :
 
-Le provider `claude_code_local` n'est pas encore implémenté dans cette livraison. Le provider `echo` sert de banc d'essai pour valider la chaîne complète `Fabric API -> agent local -> progression -> résultat`.
+- monorepo, backend Django + Channels, agent Python, frontend Angular ;
+- modèles `Agent`, `Command`, `CommandEvent`, `Conversation`, `Message` ;
+- protocole JSON versionné partagé, WebSocket agent authentifié par token ;
+- provider **`claude_code_local`** : `session.status` et `message.send` avec
+  streaming réel, continuité de session (`--resume`), options CLI
+  (`--permission-mode`, `--model`, `--allowed-tools`) et annulation ;
+- provider **`windows_powershell`** : sessions persistantes, opérations
+  structurées et **commandes brutes** (shell distant complet — voir la note de
+  sécurité ci-dessous) ;
+- provider `echo` comme banc d'essai du transport ;
+- terminal web unique qui route vers Claude ou PowerShell ;
+- tests backend et agent, `ruff` et `mypy --strict` verts.
+
+> **Sécurité — à lire avant toute exposition.** Fabric n'a aujourd'hui **aucune
+> notion de propriétaire d'agent** : tout utilisateur authentifié peut piloter
+> tous les agents enregistrés et émettre un token pour n'importe lequel. Combiné
+> au shell PowerShell brut, cela équivaut à donner un accès complet au PC
+> Windows. Ne pas exposer d'instance multi-utilisateurs sur Internet en l'état.
+> Détail et plan de correction : [docs/audit-2026-07-29.md](docs/audit-2026-07-29.md).
 
 ## Structure
 
@@ -64,8 +74,8 @@ fabric/
 
 Lanceur Windows simple :
 
-1. double-cliquer [run-fabric-dev.cmd](/C:/Users/rvilain/PycharmProjects/Fabric/run-fabric-dev.cmd)
-2. pour tout arrêter, double-cliquer [stop-fabric-dev.cmd](/C:/Users/rvilain/PycharmProjects/Fabric/stop-fabric-dev.cmd)
+1. double-cliquer [run-fabric-dev.cmd](run-fabric-dev.cmd)
+2. pour tout arrêter, double-cliquer [stop-fabric-dev.cmd](stop-fabric-dev.cmd)
 
 Le script :
 
@@ -103,9 +113,22 @@ Puis :
 4. définir `FABRIC_SERVER_WS_URL`, `FABRIC_AGENT_ID`, `FABRIC_AGENT_TOKEN`
 5. `.venv\Scripts\python -m fabric_agent`
 
+Une fois connecté, le terminal accepte directement :
+
+```text
+claude:status                      sonde l'installation Claude Code de l'agent
+claude Explique-moi ce repo        envoie un tour à Claude Code
+open                               ouvre une session PowerShell
+git status                         exécuté dans la session PowerShell
+```
+
 Voir :
 
-- [docs/quickstart.md](/C:/Users/rvilain/PycharmProjects/Fabric/docs/quickstart.md)
-- [docs/claude-code-local-mvp.md](/C:/Users/rvilain/PycharmProjects/Fabric/docs/claude-code-local-mvp.md)
-- [docs/windows-powershell-provider.md](/C:/Users/rvilain/PycharmProjects/Fabric/docs/windows-powershell-provider.md)
-- [docs/protocol.md](/C:/Users/rvilain/PycharmProjects/Fabric/docs/protocol.md)
+- [docs/quickstart.md](docs/quickstart.md)
+- [docs/claude-in-the-terminal.md](docs/claude-in-the-terminal.md)
+- [docs/agent-architecture.md](docs/agent-architecture.md)
+- [docs/claude-code-local-mvp.md](docs/claude-code-local-mvp.md)
+- [docs/claude-code-local-smoke-test.md](docs/claude-code-local-smoke-test.md)
+- [docs/windows-powershell-provider.md](docs/windows-powershell-provider.md)
+- [docs/protocol.md](docs/protocol.md)
+- [docs/audit-2026-07-29.md](docs/audit-2026-07-29.md)

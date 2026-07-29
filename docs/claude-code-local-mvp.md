@@ -93,25 +93,27 @@ Si la session n'est pas exploitable, l'agent doit renvoyer un état explicite :
 
 ## Périmètre actuel
 
-Cette première livraison n'implémente pas encore `claude_code_local`.
+`claude_code_local` est implémenté et validé de bout en bout via la CLI
+`claude` en mode `-p` :
 
-Le socle actuellement disponible couvre :
+| Capability | État |
+|---|---|
+| `session.status` | implémentée (détection conservatrice, cf. `detector.py`) |
+| `message.send` | implémentée, avec streaming réel des deltas |
+| `message.stream` | couverte par le streaming de `message.send` |
+| `message.cancel` | couverte par `command.cancel` (le process `claude` est tué) |
+| `session.attach` | implicite via `--resume <session_id>` — pas d'action dédiée |
 
-- le monorepo ;
-- le backend Django ;
-- le WebSocket agent ;
-- l'authentification de développement par token ;
-- le protocole JSON versionné ;
-- l'agent Python minimal ;
-- le provider factice `echo` ;
-- les tests backend et agent ;
-- la documentation de lancement.
+Le provider `echo` reste comme banc d'essai du transport.
 
-Le provider `echo` sert à valider la chaîne technique complète avant d'ajouter l'adapter réel vers Claude Code local.
+## Reste à faire
 
-## Ordre de travail recommandé
-
-1. conserver `echo` comme banc d'essai ;
-2. ajouter les concepts métier restants autour des conversations et messages ;
-3. concevoir l'adapter `claude_code_local` ;
-4. seulement ensuite brancher une surface Claude Code réelle.
+1. couche conversation : `apps/conversations` existe mais ne transmet ni
+   `session_id` ni `working_directory` — chaque message y repart d'une session
+   neuve, et aucune UI ne l'expose ;
+2. `session.attach` et `message.cancel` comme actions de premier rang, ou
+   retirer ces capabilities de la liste annoncée ;
+3. propriété des agents et autorisation par utilisateur (prérequis avant toute
+   exposition Internet) ;
+4. remontée des demandes d'intervention manuelle (`waiting_user_action`) :
+   le statut existe mais rien ne le produit.
