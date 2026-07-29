@@ -17,12 +17,6 @@
             "polyfills": [
               "zone.js"
             ],
-            "assets": [
-              {
-                "glob": "**/*",
-                "input": "public"
-              }
-            ],
             "styles": [
               "src/styles.css"
             ]

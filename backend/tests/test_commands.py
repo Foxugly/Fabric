@@ -194,6 +194,7 @@ async def test_command_request_can_complete_with_progress() -> None:
         username="commands-user-1",
         password="commands-password",
     )
+    await Agent.objects.filter(id=agent.id).aupdate(owner=user)
     client = APIClient()
     client.force_authenticate(user=user)
     response = await sync_to_async(client.post)(
@@ -290,6 +291,7 @@ async def test_claude_code_local_status_command_can_complete_without_progress() 
         username="commands-user-2",
         password="commands-password",
     )
+    await Agent.objects.filter(id=agent.id).aupdate(owner=user)
     client = APIClient()
     client.force_authenticate(user=user)
     response = await sync_to_async(client.post)(
@@ -386,6 +388,7 @@ async def test_command_failed_message_marks_command_failed() -> None:
         username="commands-user-3",
         password="commands-password",
     )
+    await Agent.objects.filter(id=agent.id).aupdate(owner=user)
     client = APIClient()
     client.force_authenticate(user=user)
     response = await sync_to_async(client.post)(
@@ -446,6 +449,7 @@ async def test_frontend_events_socket_receives_command_updates_and_progress() ->
         username="commands-user-4",
         password="commands-password",
     )
+    await Agent.objects.filter(id=agent.id).aupdate(owner=user)
     user_token = await Token.objects.acreate(user=user)
 
     token = await sync_to_async(agent.issue_development_token)()
@@ -582,6 +586,7 @@ async def test_cancel_running_command_marks_it_cancelled() -> None:
         username="commands-user-cancel",
         password="commands-password",
     )
+    await Agent.objects.filter(id=agent.id).aupdate(owner=user)
     client = APIClient()
     client.force_authenticate(user=user)
     response = await sync_to_async(client.post)(
@@ -676,6 +681,7 @@ async def test_agent_disconnect_fails_in_flight_commands() -> None:
         username="disconnect-user",
         password="disconnect-password",
     )
+    await Agent.objects.filter(id=agent.id).aupdate(owner=user)
     client = APIClient()
     client.force_authenticate(user=user)
     response = await sync_to_async(client.post)(

@@ -51,12 +51,20 @@ Implémenté et vérifié de bout en bout :
 - terminal web unique qui route vers Claude ou PowerShell ;
 - tests backend et agent, `ruff` et `mypy --strict` verts.
 
-> **Sécurité — à lire avant toute exposition.** Fabric n'a aujourd'hui **aucune
-> notion de propriétaire d'agent** : tout utilisateur authentifié peut piloter
-> tous les agents enregistrés et émettre un token pour n'importe lequel. Combiné
-> au shell PowerShell brut, cela équivaut à donner un accès complet au PC
-> Windows. Ne pas exposer d'instance multi-utilisateurs sur Internet en l'état.
-> Détail et plan de correction : [docs/audit-2026-07-29.md](docs/audit-2026-07-29.md).
+> **Sécurité — à lire avant toute exposition.** Un agent donne l'exécution de
+> code arbitraire sur la machine où il tourne. Chaque agent appartient à un
+> utilisateur : lui seul (et les comptes `is_staff`) peut le voir, le piloter et
+> émettre ses tokens. Conséquences concrètes :
+>
+> - ne donner `--staff` qu'à soi-même : un compte staff voit **tous** les agents ;
+> - servir Fabric en HTTPS et définir `DJANGO_SECRET_KEY` (obligatoire hors
+>   `DJANGO_DEBUG=true`) ;
+> - faire tourner l'agent sous un compte Windows non administrateur ;
+> - un prompt Claude envoyé depuis Fabric peut modifier des fichiers sans
+>   confirmation (mode `acceptEdits` par défaut) — voir
+>   [docs/claude-in-the-terminal.md](docs/claude-in-the-terminal.md).
+>
+> Détail complet : [docs/audit-2026-07-29.md](docs/audit-2026-07-29.md).
 
 ## Structure
 

@@ -20,6 +20,20 @@ PROVIDER_ACTIONS: dict[str, str] = {
     "echo": "echo.message.send",
     "claude_code_local": "claude_code_local.message.send",
 }
+CONVERSATION_TIMEOUT_SECONDS = 600
+
+
+def _build_payload(conversation: Conversation, content: str) -> dict[str, Any]:
+    """Carry the provider session forward so a conversation is really one thread.
+
+    `Conversation.external_id` holds the upstream session id (the Claude Code
+    `session_id`). Without it every message would start a brand new session and
+    the conversation would only look continuous in Fabric's own database.
+    """
+    payload: dict[str, Any] = {"text": content}
+    if conversation.external_id:
+        payload["session_id"] = conversation.external_id
+    return payload
 
 
 class ConversationViewSet(viewsets.GenericViewSet[Conversation]):
@@ -45,7 +59,10 @@ class ConversationViewSet(viewsets.GenericViewSet[Conversation]):
         return response.Response(serializer.data)
 
     def create(self, request: Any) -> response.Response:
-        serializer = ConversationCreateSerializer(data=request.data)
+        serializer = ConversationCreateSerializer(
+            data=request.data,
+            context=self.get_serializer_context(),
+        )
         serializer.is_valid(raise_exception=True)
         agent = serializer.validated_data["agent_id"]
         conversation = Conversation.objects.create(
@@ -99,7 +116,8 @@ class MessageViewSet(viewsets.GenericViewSet[Message]):
             conversation=conversation,
             provider=conversation.provider,
             action=action,
-            payload={"text": serializer.validated_data["content"]},
+            payload=_build_payload(conversation, serializer.validated_data["content"]),
+            timeout_seconds=CONVERSATION_TIMEOUT_SECONDS,
         )
         create_message_pair_for_command(
             conversation_id=str(conversation.id),

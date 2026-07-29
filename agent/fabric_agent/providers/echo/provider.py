@@ -9,6 +9,7 @@ from fabric_agent.domain.provider import Provider
 
 class EchoProvider(Provider):
     name = "echo"
+    actions = ("message.send",)
 
     async def initialize(self) -> None:
         return None
@@ -18,9 +19,6 @@ class EchoProvider(Provider):
 
     async def get_status(self) -> dict[str, Any]:
         return {"ready": True}
-
-    async def get_capabilities(self) -> list[str]:
-        return ["echo.message.send"]
 
     async def execute(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         text = str(payload.get("text", ""))

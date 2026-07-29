@@ -4,6 +4,8 @@ import asyncio
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from shared.protocol import PROVIDER_ACTIONS
+
 from fabric_agent.domain.provider import Provider
 from fabric_agent.providers.claude_code_local.detector import (
     ClaudeCodeSessionStatusDetector,
@@ -12,9 +14,6 @@ from fabric_agent.providers.claude_code_local.executor import (
     ClaudeCodeMessageExecutor,
     build_result_payload,
 )
-from fabric_agent.providers.claude_code_local.models import (
-    ClaudeCodeLocalCapabilities,
-)
 from fabric_agent.providers.claude_code_local.runner import ClaudeCodeExecutionResult
 
 
@@ -22,13 +21,13 @@ class ClaudeCodeLocalProvider(Provider):
     """Drives a user-owned local Claude Code session through the CLI."""
 
     name = "claude_code_local"
+    actions = PROVIDER_ACTIONS["claude_code_local"]
 
     def __init__(
         self,
         status_detector: ClaudeCodeSessionStatusDetector | None = None,
         message_executor: ClaudeCodeMessageExecutor | None = None,
     ) -> None:
-        self._capabilities = ClaudeCodeLocalCapabilities()
         self._status_detector = status_detector or ClaudeCodeSessionStatusDetector()
         self._message_executor = message_executor or ClaudeCodeMessageExecutor()
         self._result_cache: dict[str, dict[str, Any]] = {}
@@ -42,9 +41,6 @@ class ClaudeCodeLocalProvider(Provider):
 
     async def get_status(self) -> dict[str, Any]:
         return self._status_detector.detect().to_dict()
-
-    async def get_capabilities(self) -> list[str]:
-        return list(self._capabilities.qualified_capabilities())
 
     async def execute(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         if action == "session.status":

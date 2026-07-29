@@ -47,10 +47,10 @@ class RecordingProvider(ExecuteOnlyProvider):
     name = "claude_code_local"
 
     def __init__(self) -> None:
-        self.actions: list[str] = []
+        self.seen_actions: list[str] = []
 
     async def execute(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
-        self.actions.append(action)
+        self.seen_actions.append(action)
         return {"status": "ok"}
 
 
@@ -75,4 +75,4 @@ async def test_dispatcher_strips_the_provider_namespace_from_actions() -> None:
     )
     await dispatcher.execute("claude_code_local", "message.send", {})
 
-    assert provider.actions == ["message.send", "message.send"]
+    assert provider.seen_actions == ["message.send", "message.send"]

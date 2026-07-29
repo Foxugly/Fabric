@@ -24,15 +24,15 @@ class WindowsPowerShellProvider(Provider):
     """Safe Windows PowerShell adapter with explicit whitelisted actions only."""
 
     name = "windows_powershell"
-    _capabilities = (
-        "windows_powershell.system.info",
-        "windows_powershell.process.list",
-        "windows_powershell.claude.version",
-        "windows_powershell.session.create",
-        "windows_powershell.session.status",
-        "windows_powershell.session.close",
-        "windows_powershell.command.run",
-        "windows_powershell.network.recover",
+    actions = (
+        "system.info",
+        "process.list",
+        "claude.version",
+        "session.create",
+        "session.status",
+        "session.close",
+        "command.run",
+        "network.recover",
     )
 
     def __init__(
@@ -61,9 +61,6 @@ class WindowsPowerShellProvider(Provider):
                 else None
             ),
         }
-
-    async def get_capabilities(self) -> list[str]:
-        return list(self._capabilities)
 
     async def execute(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         if action == "command.run":

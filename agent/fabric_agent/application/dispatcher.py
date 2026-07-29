@@ -4,20 +4,9 @@ import contextlib
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from shared.protocol import local_action
+
 from fabric_agent.application.registry import ProviderRegistry
-
-
-def local_action(provider_name: str, action: str) -> str:
-    """Strip the provider namespace used on the wire (`echo.message.send`).
-
-    Fabric commands are fully qualified end to end (API, database, protocol) so
-    that a flat action list stays unambiguous. Providers only ever see their own
-    unqualified action (`message.send`).
-    """
-    prefix = f"{provider_name}."
-    if action.startswith(prefix):
-        return action[len(prefix) :]
-    return action
 
 
 class CommandDispatcher:

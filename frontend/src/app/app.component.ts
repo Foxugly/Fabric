@@ -71,7 +71,7 @@ const DEFAULT_CLAUDE_PERMISSION_MODE = 'acceptEdits';
             <input
               [ngModel]="workingDirectory()"
               (ngModelChange)="workingDirectory.set($event)"
-              placeholder="C:\\Users\\rvilain\\PycharmProjects\\Fabric"
+              placeholder="Working directory (e.g. C:\\Projects\\my-repo)"
               [disabled]="controlsLocked()"
             />
             <button
@@ -407,13 +407,13 @@ export class AppComponent implements OnDestroy {
   readonly selectedAgentId = signal<string | null>(null);
   readonly selectedAgent = signal<Agent | null>(null);
   readonly powerShellSessionId = signal<string | null>(null);
-  readonly workingDirectory = signal('C:\\Users\\rvilain\\PycharmProjects\\Fabric');
+  readonly workingDirectory = signal('');
   readonly pendingAction = signal(false);
   readonly activeCommandId = signal<string | null>(null);
   readonly terminalError = signal('');
   readonly terminalMounted = signal(true);
-  readonly loginUsername = signal('fabric-admin');
-  readonly loginPassword = signal('fabric-password');
+  readonly loginUsername = signal('');
+  readonly loginPassword = signal('');
   readonly loginError = signal('');
   readonly claudeSessionId = signal<string | null>(null);
   readonly claudePermissionMode = signal(DEFAULT_CLAUDE_PERMISSION_MODE);
@@ -1246,22 +1246,14 @@ export class AppComponent implements OnDestroy {
     }
   }
 
-  private promptDirectory(): string {
-    const path = this.promptPath();
-    const parts = path.split(/[\\/]/).filter((part) => part.length > 0);
-    return parts[parts.length - 1] || path;
-  }
-
   private promptPath(): string {
     const value = this.workingDirectory().trim().replace(/[\\/]+$/, '');
     if (value.length === 0) {
       return 'session';
     }
-    const userProfile = 'C:\\Users\\rvilain';
-    if (value.toLowerCase().startsWith(userProfile.toLowerCase())) {
-      return `~${value.slice(userProfile.length)}`;
-    }
-    return value;
+    // Keep the prompt readable on deep paths without guessing a home directory.
+    const parts = value.split(/[\\/]/).filter((part) => part.length > 0);
+    return parts.length > 3 ? `…\\${parts.slice(-2).join('\\')}` : value;
   }
 
   private async resetTerminalView(): Promise<void> {

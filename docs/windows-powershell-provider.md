@@ -187,11 +187,14 @@ The **raw `command` path is not constrained at all**. Treat an agent that
 registers this provider as equivalent to an open remote shell on that Windows
 machine, and secure it accordingly:
 
-- the Fabric API is the only authorisation boundary — anyone who can
-  authenticate and reach `POST /api/v1/commands/` owns the machine;
-- Fabric currently has **no per-agent ownership**: every authenticated user can
-  drive every registered agent. Do not expose a multi-user Fabric instance to
-  the Internet until that is fixed (see `docs/audit-2026-07-29.md`, P0-2);
+- the Fabric API is the authorisation boundary — anyone who can drive an agent
+  owns the machine it runs on;
+- an agent belongs to a user: only its owner may see it, drive it or mint its
+  tokens. **Staff accounts bypass this and see every agent**, so grant
+  `is_staff` to yourself only;
 - run the agent as an unprivileged Windows account, never as an administrator;
 - the agent's development token is a bearer credential; rotate it with
-  `POST /api/v1/agents/<id>/development-token` and revoke with `.../revoke`.
+  `POST /api/v1/agents/<id>/development-token` and revoke with `.../revoke`;
+- serve Fabric over HTTPS. Outside `DJANGO_DEBUG=true` the backend refuses to
+  start without `DJANGO_SECRET_KEY` and enables HSTS, secure cookies and an
+  HTTPS redirect.

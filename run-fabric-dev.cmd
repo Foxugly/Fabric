@@ -43,10 +43,10 @@ if not exist "%FRONTEND_DIR%\node_modules" (
 echo [4/7] Preparing backend data...
 pushd "%BACKEND_DIR%"
 "%BACKEND_PY%" manage.py migrate || goto :fail
-"%BACKEND_PY%" manage.py create_dev_user --username "%DEV_USERNAME%" --password "%DEV_PASSWORD%" || goto :fail
+"%BACKEND_PY%" manage.py create_dev_user --username "%DEV_USERNAME%" --password "%DEV_PASSWORD%" --staff || goto :fail
 
 set "AGENT_ENV_FILE=%TEMP%\fabric-agent-env-%RANDOM%%RANDOM%.txt"
-"%BACKEND_PY%" manage.py ensure_dev_agent --name "%DEV_AGENT_NAME%" > "%AGENT_ENV_FILE%" || goto :fail
+"%BACKEND_PY%" manage.py ensure_dev_agent --name "%DEV_AGENT_NAME%" --owner "%DEV_USERNAME%" > "%AGENT_ENV_FILE%" || goto :fail
 
 for /f "usebackq tokens=1,* delims==" %%A in ("%AGENT_ENV_FILE%") do (
   if /I "%%A"=="FABRIC_AGENT_ID" set "FABRIC_AGENT_ID=%%B"

@@ -26,24 +26,30 @@ python -m venv .venv
 .venv\Scripts\python manage.py runserver
 ```
 
-## 3. Créer un agent
+## 3. Créer un utilisateur frontend
 
 ```bash
-.venv\Scripts\python manage.py create_dev_agent --name demo-agent
-```
-
-La commande retourne un `agent_id` et un `development_token`.
-
-## 4. Créer un utilisateur frontend
-
-```bash
-.venv\Scripts\python manage.py create_dev_user
+.venv\Scripts\python manage.py create_dev_user --staff
 ```
 
 Identifiants par défaut :
 
 - username: `fabric-admin`
 - password: `fabric-password`
+
+`--staff` donne les droits d'administration. Un compte staff voit et pilote
+**tous** les agents de l'instance : ne l'accorder qu'à soi-même.
+
+## 4. Créer un agent
+
+L'utilisateur doit exister avant : un agent appartient à quelqu'un, et un agent
+sans propriétaire n'est visible que du staff.
+
+```bash
+.venv\Scripts\python manage.py create_dev_agent --name demo-agent --owner fabric-admin
+```
+
+La commande retourne un `agent_id` et un `development_token`.
 
 ## 5. Lancer l'agent
 

@@ -100,20 +100,22 @@ Si la session n'est pas exploitable, l'agent doit renvoyer un état explicite :
 |---|---|
 | `session.status` | implémentée (détection conservatrice, cf. `detector.py`) |
 | `message.send` | implémentée, avec streaming réel des deltas |
-| `message.stream` | couverte par le streaming de `message.send` |
-| `message.cancel` | couverte par `command.cancel` (le process `claude` est tué) |
-| `session.attach` | implicite via `--resume <session_id>` — pas d'action dédiée |
+
+Le streaming (`message.stream`), l'annulation (`message.cancel`) et l'attache
+(`session.attach`) ne sont pas des actions distinctes : le streaming est le mode
+normal de `message.send`, l'annulation passe par le message protocole générique
+`command.cancel`, et l'attache est implicite via `--resume <session_id>`. Ces
+trois noms étaient annoncés en capabilities sans exister ; ils ont été retirés.
 
 Le provider `echo` reste comme banc d'essai du transport.
 
 ## Reste à faire
 
-1. couche conversation : `apps/conversations` existe mais ne transmet ni
-   `session_id` ni `working_directory` — chaque message y repart d'une session
-   neuve, et aucune UI ne l'expose ;
-2. `session.attach` et `message.cancel` comme actions de premier rang, ou
-   retirer ces capabilities de la liste annoncée ;
-3. propriété des agents et autorisation par utilisateur (prérequis avant toute
-   exposition Internet) ;
-4. remontée des demandes d'intervention manuelle (`waiting_user_action`) :
-   le statut existe mais rien ne le produit.
+1. **pont d'autorisation des outils** : brancher `--permission-prompt-tool` sur
+   un serveur MCP local pour que les demandes d'autorisation remontent dans
+   l'interface web, au lieu du `acceptEdits` global. `waiting_user_action`
+   existe déjà côté modèle pour porter cet état ;
+2. **session persistante** via `--input-format stream-json`, au lieu d'un
+   processus `claude -p` par tour ;
+3. **interface de conversation** : `apps/conversations` transmet désormais la
+   session d'un tour au suivant, mais aucune UI ne l'expose.
