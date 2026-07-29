@@ -1,0 +1,9 @@
+# Least-priv deploy grant for Fabric (OPERATIONS.md §3.7).
+# Reference copy. The live file is /etc/sudoers.d/fabric-deploy, 0440 root:root,
+# installed by ROOT out-of-band and validated with `visudo -c`. It is NEVER
+# copied out of the django-writable tree (§3.10).
+Cmnd_Alias FABRIC_CTRL = /bin/systemctl restart fabric-asgi, /bin/systemctl restart fabric-env-fetch
+Cmnd_Alias FABRIC_WEB = /usr/sbin/nginx -t, /bin/systemctl reload nginx
+Defaults!FABRIC_CTRL !setenv, !env_keep
+Defaults!FABRIC_WEB !setenv, !env_keep
+django ALL=(root) NOPASSWD: FABRIC_CTRL, FABRIC_WEB

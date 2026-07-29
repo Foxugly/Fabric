@@ -12,6 +12,9 @@ from shared.protocol import build_message
 from apps.agents.models import Agent, AgentStatus
 from config.asgi import application
 
+#: The browser event socket is origin-checked; a real browser always sends this.
+BROWSER_HEADERS = [(b"origin", b"http://127.0.0.1:4200")]
+
 
 async def _receive_event_type(
     communicator: WebsocketCommunicator,
@@ -86,7 +89,9 @@ async def test_frontend_events_socket_receives_agent_updates() -> None:
     token = await Token.objects.acreate(user=user)
 
     event_communicator = WebsocketCommunicator(
-        application, f"/ws/v1/events/?token={token.key}"
+        application,
+        f"/ws/v1/events/?token={token.key}",
+        headers=BROWSER_HEADERS,
     )
     connected, _ = await event_communicator.connect()
     assert connected is True

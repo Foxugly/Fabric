@@ -57,8 +57,8 @@ Implémenté et vérifié de bout en bout :
 > émettre ses tokens. Conséquences concrètes :
 >
 > - ne donner `--staff` qu'à soi-même : un compte staff voit **tous** les agents ;
-> - servir Fabric en HTTPS et définir `DJANGO_SECRET_KEY` (obligatoire hors
->   `DJANGO_DEBUG=true`) ;
+> - servir Fabric en HTTPS et définir `SECRET_KEY` (obligatoire dès que `DEBUG`
+>   est faux, tout comme `REDIS_URL`) ;
 > - faire tourner l'agent sous un compte Windows non administrateur ;
 > - Claude demande une autorisation avant chaque outil et la question remonte
 >   dans le terminal (`allow` / `deny [raison]`) — voir

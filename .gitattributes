@@ -1,0 +1,11 @@
+* text=auto
+
+# Anything executed on the Linux box must keep LF. A CR in a shebang line makes
+# the kernel look for an interpreter named "/bin/bash\r" and the deploy dies with
+# "bad interpreter".
+*.sh              text eol=lf
+deploy/systemd/*  text eol=lf
+deploy/nginx/*    text eol=lf
+deploy/sudoers/*  text eol=lf
+*.yml             text eol=lf
+*.yaml            text eol=lf

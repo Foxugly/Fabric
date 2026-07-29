@@ -2,9 +2,9 @@ services:
   postgres:
     image: postgres:17
     environment:
-      POSTGRES_DB: ${FABRIC_DB_NAME:-fabric}
-      POSTGRES_USER: ${FABRIC_DB_USER:-fabric}
-      POSTGRES_PASSWORD: ${FABRIC_DB_PASSWORD:-fabric}
+      POSTGRES_DB: ${DB_NAME:-fabric}
+      POSTGRES_USER: ${DB_USER:-fabric}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-fabric}
     ports:
       - "5432:5432"
     volumes:

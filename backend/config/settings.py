@@ -15,26 +15,34 @@ REPO_ROOT = BASE_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() == "true"
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
+def _env(name: str, default: str = "") -> str:
+    return os.environ.get(name, default).strip()
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = _env(name)
+    if not raw:
+        return default
+    return raw.lower() in {"1", "true", "yes", "on"}
+
+
+def _env_list(name: str, default: str = "") -> list[str]:
+    return [item.strip() for item in _env(name, default).split(",") if item.strip()]
+
+
+#: Fleet env selector (OPERATIONS.md §3.14): `PROD` or `DEV`.
+STATE = _env("STATE", "DEV").upper()
+DEBUG = _env_bool("DEBUG", STATE != "PROD")
+
+SECRET_KEY = _env("SECRET_KEY")
 if not SECRET_KEY:
     if not DEBUG:
-        raise ImproperlyConfigured(
-            "DJANGO_SECRET_KEY must be set when DJANGO_DEBUG is not true"
-        )
+        raise ImproperlyConfigured("SECRET_KEY must be set when DEBUG is off")
     SECRET_KEY = "dev-secret-key"
 
-ALLOWED_HOSTS = [
-    host.strip()
-    for host in os.environ.get("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
-    if host.strip()
-]
-CSRF_TRUSTED_ORIGINS = [
-    origin.strip()
-    for origin in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",")
-    if origin.strip()
-]
+ALLOWED_HOSTS = _env_list("ALLOWED_HOSTS", "127.0.0.1,localhost")
+CSRF_TRUSTED_ORIGINS = _env_list("CSRF_TRUSTED_ORIGINS")
 
 INSTALLED_APPS = [
     "daphne",
@@ -84,48 +92,79 @@ TEMPLATES = [
     }
 ]
 
-default_sqlite_path = BASE_DIR / "db.sqlite3"
-if os.environ.get("FABRIC_DB_HOST"):
+# Database — fleet DB_* 6-var convention (OPERATIONS.md §3.13). No DB_ENGINE
+# means sqlite, which is the local development and test path.
+DB_ENGINE_ALIASES = {
+    "postgresql": "django.db.backends.postgresql",
+    "postgres": "django.db.backends.postgresql",
+    "sqlite3": "django.db.backends.sqlite3",
+    "sqlite": "django.db.backends.sqlite3",
+}
+_db_engine = _env("DB_ENGINE")
+if _db_engine:
     DATABASES = {
         "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.environ.get("FABRIC_DB_NAME", "fabric"),
-            "USER": os.environ.get("FABRIC_DB_USER", "fabric"),
-            "PASSWORD": os.environ.get("FABRIC_DB_PASSWORD", "fabric"),
-            "HOST": os.environ.get("FABRIC_DB_HOST", "127.0.0.1"),
-            "PORT": os.environ.get("FABRIC_DB_PORT", "5432"),
+            "ENGINE": DB_ENGINE_ALIASES.get(_db_engine, _db_engine),
+            "NAME": _env("DB_NAME", "fabric"),
+            "USER": _env("DB_USER", "fabric"),
+            "PASSWORD": os.environ.get("DB_PASSWORD", ""),
+            "HOST": _env("DB_HOST", "127.0.0.1"),
+            "PORT": _env("DB_PORT", "5432"),
+            "CONN_MAX_AGE": 60,
         }
     }
 else:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
-            "NAME": str(default_sqlite_path),
+            "NAME": str(BASE_DIR / "db.sqlite3"),
         }
     }
+
+AUTH_PASSWORD_VALIDATORS = [
+    {
+        "NAME": "django.contrib.auth.password_validation."
+        "UserAttributeSimilarityValidator"
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 12},
+    },
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
-STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-if os.environ.get("FABRIC_REDIS_URL"):
+STATIC_URL = "/static/"
+STATIC_ROOT = str(BASE_DIR / "staticfiles")
+
+# Channels — Redis is mandatory as soon as more than one process is involved,
+# because command dispatch and permission requests travel through the layer
+# (OPERATIONS.md §3.11, ASGI section). Fabric uses Redis DB 5.
+REDIS_URL = _env("REDIS_URL")
+if REDIS_URL:
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
-            "CONFIG": {"hosts": [os.environ["FABRIC_REDIS_URL"]]},
+            "CONFIG": {"hosts": [REDIS_URL]},
         }
     }
+elif not DEBUG:
+    raise ImproperlyConfigured(
+        "REDIS_URL is required when DEBUG is off: the in-memory channel layer "
+        "does not carry commands between processes"
+    )
 else:
-    CHANNEL_LAYERS = {
-        "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}
-    }
+    CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.TokenAuthentication",
+        "apps.api_auth.authentication.ExpiringTokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
@@ -133,21 +172,23 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
-    ]
+    ],
+    # Login is the only barrier between the Internet and remote code execution
+    # on the operator's PC, so it is rate limited by IP.
+    "DEFAULT_THROTTLE_CLASSES": [],
+    "DEFAULT_THROTTLE_RATES": {
+        "login": _env("THROTTLE_LOGIN", "10/hour"),
+    },
 }
 
-CORS_ALLOWED_ORIGINS = [
-    origin.strip()
-    for origin in os.environ.get(
-        "FABRIC_CORS_ALLOWED_ORIGINS",
-        "http://127.0.0.1:4200,http://localhost:4200",
-    ).split(",")
-    if origin.strip()
-]
+CORS_ALLOWED_ORIGINS = _env_list(
+    "CORS_ALLOWED_ORIGINS",
+    "http://127.0.0.1:4200,http://localhost:4200",
+)
 
-#: An agent is remote code execution on someone's machine. When Fabric is not in
-#: debug mode it is assumed to be reachable from the Internet, so transport
-#: security is mandatory rather than optional.
+#: An agent grants remote code execution on the machine it runs on. Outside debug
+#: Fabric is assumed reachable from the Internet, so transport security is
+#: mandatory rather than optional.
 if not DEBUG:
     SECURE_SSL_REDIRECT = True
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
@@ -157,9 +198,10 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
     X_FRAME_OPTIONS = "DENY"
 
-FABRIC_LOG_LEVEL = os.environ.get("FABRIC_LOG_LEVEL", "INFO").upper()
+LOG_LEVEL = _env("LOG_LEVEL", _env("FABRIC_LOG_LEVEL", "INFO")).upper()
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -173,7 +215,7 @@ LOGGING = {
     "loggers": {
         "apps": {
             "handlers": ["console"],
-            "level": FABRIC_LOG_LEVEL,
+            "level": LOG_LEVEL,
             "propagate": False,
         },
         "django.request": {
@@ -184,7 +226,23 @@ LOGGING = {
     },
 }
 
-#: A command whose agent never reports back is reaped this long after it started.
-FABRIC_COMMAND_GRACE_SECONDS = int(
-    os.environ.get("FABRIC_COMMAND_GRACE_SECONDS", "30")
-)
+#: A command whose agent never reports back is timed out this long after its own
+#: `timeout_seconds` has elapsed.
+FABRIC_COMMAND_GRACE_SECONDS = int(_env("FABRIC_COMMAND_GRACE_SECONDS", "30"))
+
+#: How long an issued API token stays valid. A token is a bearer credential for
+#: an agent that can run code, so it must not live forever.
+FABRIC_TOKEN_TTL_HOURS = int(_env("FABRIC_TOKEN_TTL_HOURS", "168"))
+
+# Sentry (OPERATIONS.md §3.8) — optional so local development stays offline.
+SENTRY_DSN = _env("SENTRY_DSN")
+if SENTRY_DSN:  # pragma: no cover - exercised in production only
+    import sentry_sdk
+
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=_env("SENTRY_ENVIRONMENT", STATE),
+        release=_env("SENTRY_RELEASE") or None,
+        traces_sample_rate=float(_env("SENTRY_TRACES_SAMPLE_RATE", "0")),
+        send_default_pii=False,
+    )

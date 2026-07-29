@@ -1,0 +1,29 @@
+[Unit]
+Description=Fabric — Daphne (ASGI, config.asgi) — drives local Claude Code / PowerShell agents
+After=network.target fabric-env-fetch.service redis-server.service postgresql.service
+# Hard dependency: without the SSM-fetched env, refuse to start.
+Requires=fabric-env-fetch.service
+
+[Service]
+User=django
+Group=www-data
+UMask=0027
+WorkingDirectory=/var/www/django_websites/Fabric/backend
+EnvironmentFile=/run/fabric/.env
+# Daphne (not gunicorn): Channels needs an ASGI server. Binds localhost:8008
+# (§3.4); nginx proxies HTTP and upgrades /ws/ to it.
+# Agents hold a long-lived outbound WebSocket, so daphne's idle timeout must not
+# cut them off — the agent's own heartbeat is every 10s.
+ExecStart=/var/www/django_websites/Fabric/backend/.venv/bin/daphne \
+    -b 127.0.0.1 -p 8008 \
+    --application-close-timeout 10 \
+    --websocket_timeout -1 \
+    config.asgi:application
+Restart=always
+RestartSec=5
+KillMode=mixed
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

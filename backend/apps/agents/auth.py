@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs
 
+from django.core.exceptions import ValidationError
+
 from apps.agents.models import Agent, AgentStatus
 
 
@@ -13,7 +15,9 @@ def authenticate_agent(query_string: bytes) -> Agent | None:
         return None
     try:
         agent = Agent.objects.get(id=agent_ids[0])
-    except Agent.DoesNotExist:
+    except (Agent.DoesNotExist, ValidationError, ValueError):
+        # A malformed agent_id must be refused like any other bad credential:
+        # an unhandled ValidationError would crash the consumer instead.
         return None
     if agent.status == AgentStatus.DISABLED:
         return None
