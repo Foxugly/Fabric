@@ -5,6 +5,7 @@ import {
   ElementRef,
   HostListener,
   OnDestroy,
+  effect,
   inject,
   signal,
 } from '@angular/core';
@@ -26,6 +27,7 @@ const FINAL_COMMAND_STATUSES = new Set<CommandStatus>([
   'timed_out',
 ]);
 const TERMINAL_HISTORY_STORAGE_KEY = 'fabric.terminal.history';
+const TERMINAL_STATE_STORAGE_KEY = 'fabric.terminal.state';
 const TERMINAL_HISTORY_LIMIT = 200;
 const TERMINAL_OUTPUT_MAX_CHARS = 120_000;
 const TERMINAL_OUTPUT_TRIM_MARKER = '[output trimmed]\n';
@@ -88,6 +90,14 @@ const TERMINAL_OUTPUT_TRIM_MARKER = '[output trimmed]\n';
               (click)="cancelActiveCommand()"
             >
               Cancel
+            </button>
+            <button
+              type="button"
+              class="secondary-button"
+              [disabled]="!hasTerminalOutput()"
+              (click)="copyTerminalOutput()"
+            >
+              Copy output
             </button>
             <button type="button" class="secondary-button" (click)="logout()">Sign out</button>
           </div>
@@ -409,13 +419,20 @@ export class AppComponent implements OnDestroy {
   private historyIndex: number | null = null;
   private historyDraft = '';
   private shouldAutoScroll = true;
+  private resumedTerminalState = false;
 
   constructor() {
+    this.restoreTerminalState();
+
     this.subscriptions.add(
       this.runtimeErrorService.error$.subscribe((message) => {
         this.runtimeError.set(message);
       }),
     );
+
+    effect(() => {
+      this.persistTerminalState();
+    });
 
     this.subscriptions.add(
       this.authService.session$.subscribe((session) => {
@@ -428,6 +445,7 @@ export class AppComponent implements OnDestroy {
           this.activeCommandId.set(null);
           this.agents.set([]);
           this.resetStreamingState();
+          this.resumedTerminalState = false;
           return;
         }
 
@@ -446,6 +464,10 @@ export class AppComponent implements OnDestroy {
         const current = this.selectedAgentId();
         if (current !== null) {
           this.selectedAgent.set(agents.find((agent) => agent.id === current) ?? null);
+        }
+        if (!this.resumedTerminalState && this.selectedAgent() !== null) {
+          this.resumedTerminalState = true;
+          void this.resumePersistedTerminalContext();
         }
       }),
     );
@@ -530,6 +552,10 @@ export class AppComponent implements OnDestroy {
     return this.terminalError() || this.runtimeError();
   }
 
+  hasTerminalOutput(): boolean {
+    return this.renderedResponse.length > 0;
+  }
+
   submitLogin(): void {
     this.loginError.set('');
     this.authService.login(this.loginUsername(), this.loginPassword()).subscribe({
@@ -547,6 +573,7 @@ export class AppComponent implements OnDestroy {
     this.authService.logout().subscribe({
       next: () => {
         this.loginError.set('');
+        this.clearTerminalState();
       },
     });
   }
@@ -607,6 +634,16 @@ export class AppComponent implements OnDestroy {
         this.terminalError.set(message);
         this.terminalService.sendResponse(message);
       },
+    });
+  }
+
+  copyTerminalOutput(): void {
+    if (this.renderedResponse.length === 0) {
+      return;
+    }
+
+    void this.writeClipboard(this.renderedResponse).catch((error: unknown) => {
+      this.terminalError.set(this.extractHttpError(error, 'Copy failed'));
     });
   }
 
@@ -798,6 +835,39 @@ export class AppComponent implements OnDestroy {
     }
   }
 
+  private async resumePersistedTerminalContext(): Promise<void> {
+    const activeCommandId = this.activeCommandId();
+    if (activeCommandId !== null) {
+      await this.syncActiveCommand(activeCommandId);
+      return;
+    }
+
+    const sessionId = this.powerShellSessionId();
+    const agent = this.selectedAgent();
+    if (sessionId === null || agent === null) {
+      return;
+    }
+
+    try {
+      const created = await firstValueFrom(
+        this.commandService.createCommand({
+          agent_id: agent.id,
+          provider: 'windows_powershell',
+          action: 'windows_powershell.session.status',
+          payload: { session_id: sessionId },
+          timeout_seconds: 20,
+        }),
+      );
+      const completed = await this.waitForCommand(created.id);
+      if (completed.status !== 'succeeded') {
+        throw new Error(completed.error || 'Session restore failed');
+      }
+      this.captureSessionState(completed);
+    } catch {
+      this.powerShellSessionId.set(null);
+    }
+  }
+
   private async handleLocalTerminalCommand(command: string): Promise<boolean> {
     const normalized = command.trim().toLowerCase();
 
@@ -954,6 +1024,54 @@ export class AppComponent implements OnDestroy {
     this.stdoutBuffer = '';
     this.stderrBuffer = '';
     this.renderedResponse = '';
+  }
+
+  private restoreTerminalState(): void {
+    try {
+      const raw = globalThis.localStorage.getItem(TERMINAL_STATE_STORAGE_KEY);
+      if (raw === null) {
+        return;
+      }
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      if (typeof parsed['selectedAgentId'] === 'string') {
+        this.selectedAgentId.set(parsed['selectedAgentId']);
+      }
+      if (typeof parsed['powerShellSessionId'] === 'string') {
+        this.powerShellSessionId.set(parsed['powerShellSessionId']);
+      }
+      if (typeof parsed['activeCommandId'] === 'string') {
+        this.activeCommandId.set(parsed['activeCommandId']);
+      }
+      if (typeof parsed['workingDirectory'] === 'string' && parsed['workingDirectory'].length > 0) {
+        this.workingDirectory.set(parsed['workingDirectory']);
+      }
+    } catch {
+      this.clearTerminalState();
+    }
+  }
+
+  private persistTerminalState(): void {
+    try {
+      globalThis.localStorage.setItem(
+        TERMINAL_STATE_STORAGE_KEY,
+        JSON.stringify({
+          selectedAgentId: this.selectedAgentId(),
+          powerShellSessionId: this.powerShellSessionId(),
+          activeCommandId: this.activeCommandId(),
+          workingDirectory: this.workingDirectory(),
+        }),
+      );
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+
+  private clearTerminalState(): void {
+    try {
+      globalThis.localStorage.removeItem(TERMINAL_STATE_STORAGE_KEY);
+    } catch {
+      // Ignore storage failures.
+    }
   }
 
   private promptDirectory(): string {
@@ -1197,6 +1315,14 @@ export class AppComponent implements OnDestroy {
     } catch {
       // Ignore storage failures.
     }
+  }
+
+  private async writeClipboard(value: string): Promise<void> {
+    if (navigator.clipboard?.writeText !== undefined) {
+      await navigator.clipboard.writeText(value);
+      return;
+    }
+    throw new Error('Clipboard API unavailable');
   }
 
   private asRecord(value: unknown): Record<string, unknown> | null {
