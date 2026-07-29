@@ -60,9 +60,11 @@ Implémenté et vérifié de bout en bout :
 > - servir Fabric en HTTPS et définir `DJANGO_SECRET_KEY` (obligatoire hors
 >   `DJANGO_DEBUG=true`) ;
 > - faire tourner l'agent sous un compte Windows non administrateur ;
-> - un prompt Claude envoyé depuis Fabric peut modifier des fichiers sans
->   confirmation (mode `acceptEdits` par défaut) — voir
->   [docs/claude-in-the-terminal.md](docs/claude-in-the-terminal.md).
+> - Claude demande une autorisation avant chaque outil et la question remonte
+>   dans le terminal (`allow` / `deny [raison]`) — voir
+>   [docs/permission-bridge.md](docs/permission-bridge.md).
+>   `claude:mode acceptEdits` supprime ces demandes : à n'utiliser qu'en
+>   connaissance de cause.
 >
 > Détail complet : [docs/audit-2026-07-29.md](docs/audit-2026-07-29.md).
 
@@ -134,6 +136,7 @@ Voir :
 
 - [docs/quickstart.md](docs/quickstart.md)
 - [docs/claude-in-the-terminal.md](docs/claude-in-the-terminal.md)
+- [docs/permission-bridge.md](docs/permission-bridge.md)
 - [docs/agent-architecture.md](docs/agent-architecture.md)
 - [docs/claude-code-local-mvp.md](docs/claude-code-local-mvp.md)
 - [docs/claude-code-local-smoke-test.md](docs/claude-code-local-smoke-test.md)

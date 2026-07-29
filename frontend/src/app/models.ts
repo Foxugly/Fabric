@@ -62,6 +62,21 @@ export interface CommandEvent {
   created_at: string;
 }
 
+export type PermissionDecision = 'pending' | 'allowed' | 'denied' | 'expired';
+
+export interface PermissionRequest {
+  id: string;
+  command: string;
+  request_id: string;
+  tool_name: string;
+  tool_input: Record<string, unknown>;
+  tool_use_id: string;
+  decision: PermissionDecision;
+  decision_message: string;
+  created_at: string;
+  decided_at: string | null;
+}
+
 export interface Command {
   id: string;
   agent: string;
@@ -77,6 +92,7 @@ export interface Command {
   timeout_seconds: number;
   correlation_id: string;
   events: CommandEvent[];
+  permission_requests: PermissionRequest[];
 }
 
 export interface CreateCommandRequest {

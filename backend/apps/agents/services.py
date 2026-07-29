@@ -79,6 +79,36 @@ def dispatch_command_cancel(command: Command) -> None:
     )
 
 
+def dispatch_permission_decision(
+    command: Command,
+    *,
+    request_id: str,
+    allowed: bool,
+    message: str = "",
+) -> None:
+    """Unblock the Claude Code turn waiting on this approval."""
+    channel_layer = get_channel_layer()
+    if channel_layer is None:
+        return
+
+    async_to_sync(channel_layer.group_send)(
+        f"agent.{command.agent_id}",
+        {
+            "type": "session.action_response",
+            "message": build_message(
+                message_type="session.action_response",
+                correlation_id=str(command.correlation_id),
+                payload={
+                    "command_id": str(command.id),
+                    "request_id": request_id,
+                    "behavior": "allow" if allowed else "deny",
+                    "message": message,
+                },
+            ),
+        },
+    )
+
+
 def update_agent_presence(
     agent: Agent,
     *,

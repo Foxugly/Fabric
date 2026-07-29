@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { merge, Observable, of, Subject, timer } from 'rxjs';
 import { shareReplay, switchMap } from 'rxjs/operators';
 
-import { Command, CreateCommandRequest } from '../models';
+import { Command, CreateCommandRequest, PermissionRequest } from '../models';
 import { ApiBaseService } from './api-base.service';
 import { AuthService } from './auth.service';
 
@@ -41,6 +41,19 @@ export class CommandService {
     return this.http.post<Command | { id: string; status: string }>(
       this.apiBase.buildUrl(`/commands/${commandId}/cancel/`),
       {},
+    );
+  }
+
+  /** Answer a tool approval Claude Code is blocked on. */
+  decidePermission(
+    commandId: string,
+    requestId: string,
+    behavior: 'allow' | 'deny',
+    message = '',
+  ): Observable<PermissionRequest> {
+    return this.http.post<PermissionRequest>(
+      this.apiBase.buildUrl(`/commands/${commandId}/permissions/${requestId}/`),
+      { behavior, message },
     );
   }
 

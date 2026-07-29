@@ -19,10 +19,11 @@ claude              affiche le contexte courant (session, répertoire, mode)
 claude:status       sonde l'installation Claude Code de la machine
 claude:new          oublie l'identifiant de session : le prochain prompt en ouvre une neuve
 claude:mode <mode>  change le mode de permission
+allow / deny [why]  répond à une demande d'autorisation en attente
 ```
 
-Modes de permission acceptés : `acceptEdits` (défaut), `plan`,
-`bypassPermissions`, `auto`, `manual`, `default`.
+Modes de permission acceptés : `default` (défaut — demande via le pont
+d'autorisation), `acceptEdits`, `plan`, `bypassPermissions`, `auto`, `manual`.
 
 ## Continuité de session
 
@@ -40,16 +41,25 @@ Claude : c'est ce qui détermine le projet sur lequel Claude travaille, quels
 `CLAUDE.md` sont chargés et quels fichiers sont accessibles. Changer ce champ
 change de projet.
 
-## Mode de permission : le point important
+## Autorisations
 
-En mode `-p` (non interactif), Claude Code ne peut pas afficher de demande
-d'autorisation. Sans `--permission-mode`, tout outil qui en exige une est
-simplement refusé, et Claude répond « je n'ai pas pu ». C'est pour cela que le
-terminal envoie `acceptEdits` par défaut.
+Le mode par défaut est `default` : Claude **demande** avant d'utiliser un outil,
+et la question remonte dans le terminal.
 
-Conséquence à assumer : **un prompt envoyé depuis Fabric peut modifier des
-fichiers sur le PC Windows sans confirmation**. Utilisez `claude:mode plan` pour
-une session en lecture seule.
+```text
+[?] Claude requests permission: Write — C:\Projects\demo\hello.txt
+    allow           - run it
+    deny [reason]   - refuse and tell Claude why
+```
+
+Le tour est réellement suspendu sur le PC pendant ce temps. La raison d'un refus
+est transmise à Claude. Détail du mécanisme :
+[permission-bridge.md](permission-bridge.md).
+
+Pour ne plus être interrompu, `claude:mode acceptEdits` : les modifications de
+fichiers passent sans demande. **À utiliser en connaissance de cause** — un
+prompt envoyé depuis Fabric modifie alors des fichiers sans confirmation.
+`claude:mode plan` donne un tour strictement en lecture.
 
 ## Affichage
 

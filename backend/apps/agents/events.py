@@ -6,8 +6,12 @@ from shared.protocol import build_message
 
 from apps.agents.models import Agent
 from apps.agents.serializers import AgentSerializer
-from apps.commands.models import Command, CommandEvent
-from apps.commands.serializers import CommandEventSerializer, CommandSerializer
+from apps.commands.models import Command, CommandEvent, PermissionRequest
+from apps.commands.serializers import (
+    CommandEventSerializer,
+    CommandSerializer,
+    PermissionRequestSerializer,
+)
 
 
 def publish_agent_updated(agent: Agent) -> None:
@@ -31,6 +35,23 @@ def publish_command_updated(command: Command) -> None:
         message_type="command.updated",
         correlation_id=str(command.correlation_id),
         payload={"command": CommandSerializer(command).data},
+    )
+
+
+def publish_permission_request(
+    command: Command,
+    request: PermissionRequest,
+) -> None:
+    if command.requested_by_id is None:
+        return
+    _publish_to_group(
+        group_name=f"events.user.{command.requested_by_id}",
+        message_type="command.permission_request",
+        correlation_id=str(command.correlation_id),
+        payload={
+            "command_id": str(command.id),
+            "permission_request": PermissionRequestSerializer(request).data,
+        },
     )
 
 

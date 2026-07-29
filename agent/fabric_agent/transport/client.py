@@ -8,6 +8,7 @@ import platform
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
+from uuid import uuid4
 
 from shared.protocol import build_message, parse_message
 from websockets.asyncio.client import ClientConnection, connect
@@ -15,6 +16,11 @@ from websockets.asyncio.client import ClientConnection, connect
 from fabric_agent.application.config import AgentConfig
 from fabric_agent.application.dispatcher import CommandDispatcher
 from fabric_agent.application.registry import ProviderRegistry
+from fabric_agent.permissions import (
+    PermissionDecision,
+    PermissionGateway,
+    PermissionRequest,
+)
 from fabric_agent.transport.connectivity import ConnectivityWatchdog
 
 
@@ -40,11 +46,16 @@ class AgentWebSocketClient:
         config: AgentConfig,
         registry: ProviderRegistry,
         dispatcher: CommandDispatcher,
+        permission_gateway: PermissionGateway | None = None,
     ) -> None:
         self._config = config
         self._registry = registry
         self._dispatcher = dispatcher
+        self._permission_gateway = permission_gateway
         self._active_commands: dict[str, ActiveCommand] = {}
+        self._websocket: ClientConnection | None = None
+        if permission_gateway is not None:
+            permission_gateway.set_handler(self._publish_permission_request)
 
     async def run_forever(self) -> None:
         backoff = 1
@@ -69,6 +80,7 @@ class AgentWebSocketClient:
             {"agent_id": self._config.agent_id, "token": self._config.agent_token}
         )
         async with connect(f"{self._config.server_ws_url}?{query}") as websocket:
+            self._websocket = websocket
             await self._send_hello(websocket)
             await self._send_capabilities(websocket)
             heartbeat_task = asyncio.create_task(self._heartbeat_loop(websocket))
@@ -85,6 +97,12 @@ class AgentWebSocketClient:
                         message.correlation_id,
                     )
             finally:
+                self._websocket = None
+                if self._permission_gateway is not None:
+                    # Nobody can answer a pending approval once Fabric is gone.
+                    self._permission_gateway.fail_pending(
+                        "Connection to Fabric was lost before you answered"
+                    )
                 heartbeat_task.cancel()
                 watchdog_task.cancel()
                 for active_command in self._active_commands.values():
@@ -144,6 +162,10 @@ class AgentWebSocketClient:
     ) -> None:
         if message_type == "command.cancel":
             await self._cancel_active_command(payload)
+            return
+
+        if message_type == "session.action_response":
+            self._resolve_permission_request(payload)
             return
 
         if message_type != "command.request":
@@ -273,6 +295,39 @@ class AgentWebSocketClient:
             )
         finally:
             self._active_commands.pop(command_id, None)
+
+    async def _publish_permission_request(self, request: PermissionRequest) -> None:
+        """Ask Fabric — and therefore the operator — to rule on a tool call."""
+        websocket = self._websocket
+        if websocket is None:
+            raise ConnectionError("Not connected to Fabric")
+        LOGGER.info(
+            "Permission requested for %s (command %s)",
+            request.tool_name,
+            request.command_id,
+        )
+        await self._send_message(
+            websocket,
+            "session.action_required",
+            request.command_id or str(uuid4()),
+            request.to_payload(),
+        )
+
+    def _resolve_permission_request(self, payload: dict[str, Any]) -> None:
+        if self._permission_gateway is None:
+            return
+        request_id = str(payload.get("request_id", ""))
+        decision = PermissionDecision(
+            allowed=payload.get("behavior") == "allow",
+            message=str(payload.get("message", "")),
+            updated_input=(
+                payload["updated_input"]
+                if isinstance(payload.get("updated_input"), dict)
+                else None
+            ),
+        )
+        if not self._permission_gateway.resolve(request_id, decision):
+            LOGGER.warning("No permission request is waiting for %s", request_id)
 
     async def _cancel_active_command(self, payload: dict[str, Any]) -> None:
         command_id = str(payload["command_id"])

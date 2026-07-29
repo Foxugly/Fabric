@@ -23,6 +23,8 @@ SUPPORTED_TYPES = {
     "command.updated",
     "command.event",
     "session.action_required",
+    "session.action_response",
+    "command.permission_request",
     "error",
 }
 

@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
+from fabric_agent.permissions.gateway import PermissionGateway
 from fabric_agent.providers.claude_code_local.detector import (
     ClaudeCodeInstallationProbe,
     ClaudeCodeInstallationProbeLike,
@@ -16,6 +17,7 @@ from fabric_agent.providers.claude_code_local.runner import (
     ClaudeCodeCliRunner,
     ClaudeCodeExecutionRequest,
     ClaudeCodeExecutionResult,
+    PermissionPrompt,
     StreamChunk,
 )
 
@@ -33,8 +35,10 @@ class ClaudeCodeMessageExecutor:
     def __init__(
         self,
         installation_probe: ClaudeCodeInstallationProbeLike | None = None,
+        permission_gateway: PermissionGateway | None = None,
     ) -> None:
         self._installation_probe = installation_probe or ClaudeCodeInstallationProbe()
+        self._permission_gateway = permission_gateway
         self._running: dict[str, asyncio.subprocess.Process] = {}
 
     async def execute(self, payload: dict[str, Any]) -> ClaudeCodeExecutionResult:
@@ -106,6 +110,25 @@ class ClaudeCodeMessageExecutor:
             disallowed_tools=_tool_list(
                 payload.get("disallowed_tools"), "disallowed_tools"
             ),
+            permission_prompt=self._permission_prompt(payload),
+        )
+
+    def _permission_prompt(self, payload: dict[str, Any]) -> PermissionPrompt | None:
+        """Wire the approval bridge unless the caller opted out.
+
+        Without it, `-p` denies every tool that needs approval, so the bridge is
+        on by default; a payload can disable it to fall back on a blanket
+        `permission_mode` such as `acceptEdits`.
+        """
+        if payload.get("permission_prompt") is False:
+            return None
+        gateway = self._permission_gateway
+        if gateway is None or not gateway.is_running:
+            return None
+        return PermissionPrompt(
+            port=gateway.port,
+            token=gateway.token,
+            command_id=_command_id(payload),
         )
 
 
