@@ -30,11 +30,13 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     },
     str(CommandStatus.DISPATCHED): {
         str(CommandStatus.RUNNING),
+        str(CommandStatus.WAITING_USER_ACTION),
         str(CommandStatus.FAILED),
         str(CommandStatus.CANCELLED),
     },
     str(CommandStatus.RUNNING): {
         str(CommandStatus.SUCCEEDED),
+        str(CommandStatus.WAITING_USER_ACTION),
         str(CommandStatus.FAILED),
         str(CommandStatus.TIMED_OUT),
         str(CommandStatus.CANCELLED),
@@ -94,6 +96,59 @@ class Command(models.Model):
 
     def can_transition_to(self, next_status: str) -> bool:
         return next_status in ALLOWED_TRANSITIONS[self.status]
+
+
+class PermissionDecision(models.TextChoices):
+    PENDING = "pending", "Pending"
+    ALLOWED = "allowed", "Allowed"
+    DENIED = "denied", "Denied"
+    EXPIRED = "expired", "Expired"
+
+
+class PermissionRequest(models.Model):
+    """A tool call Claude Code cannot run until a human says so.
+
+    In `--print` mode the CLI has no dialog to draw, so it delegates to Fabric
+    through an MCP prompt tool. Each row is one pending question; the turn is
+    blocked on the machine until it is answered.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    command = models.ForeignKey(
+        Command,
+        on_delete=models.CASCADE,
+        related_name="permission_requests",
+    )
+    #: Correlates with the request the agent is blocked on.
+    request_id = models.UUIDField(unique=True)
+    tool_name = models.CharField(max_length=255)
+    tool_input = models.JSONField(default=dict, blank=True)
+    tool_use_id = models.CharField(max_length=255, blank=True)
+    decision = models.CharField(
+        max_length=16,
+        choices=PermissionDecision.choices,
+        default=PermissionDecision.PENDING,
+    )
+    decision_message = models.TextField(blank=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="permission_decisions",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.tool_name} ({self.decision})"
+
+    @property
+    def is_pending(self) -> bool:
+        return self.decision == PermissionDecision.PENDING
 
 
 class CommandEvent(models.Model):

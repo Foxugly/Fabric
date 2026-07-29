@@ -62,6 +62,7 @@ in `session.status`.
 | streaming | `claude -p --output-format stream-json --verbose --include-partial-messages` |
 | continuity | `--resume <session_id>`; the returned `session_id` must be re-used |
 | options | `--permission-mode`, `--model`, `--allowed-tools`, `--disallowed-tools` |
+| approvals | `--permission-prompt-tool` bridged to the web UI, see [permission-bridge.md](permission-bridge.md) |
 | cancellation | the running child process is killed by `_fabric_command_id` |
 
 Progress events carry `message.delta` (text) and `message.tool_use` (a one-line
@@ -70,9 +71,10 @@ summary of each tool call) so a terminal can show activity, not just the answer.
 See [claude-in-the-terminal.md](claude-in-the-terminal.md) and
 [claude-code-local-smoke-test.md](claude-code-local-smoke-test.md).
 
-## Not yet implemented
+## Protocol messages beyond commands
 
-`session.attach` and `message.cancel` are advertised in
-`ClaudeCodeLocalCapabilities` but have no dedicated action: cancellation goes
-through the generic `command.cancel` protocol message, and attaching is implicit
-via `--resume`. The capability list should be trimmed or the actions added.
+| Message | Direction | Role |
+|---|---|---|
+| `session.action_required` | agent → Fabric | a tool call needs a human decision |
+| `session.action_response` | Fabric → agent | the decision, which unblocks the turn |
+| `command.permission_request` | Fabric → browser | surfaces the question in the UI |

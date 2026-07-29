@@ -2,19 +2,35 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.core.exceptions import ValidationError
+from django.utils import timezone
 from rest_framework import response, serializers, status, viewsets
 from rest_framework.decorators import action
 
 from apps.agents.events import publish_command_updated
-from apps.agents.services import dispatch_command, dispatch_command_cancel
-from apps.commands.models import Command, CommandStatus
-from apps.commands.serializers import CommandCreateSerializer, CommandSerializer
+from apps.agents.services import (
+    dispatch_command,
+    dispatch_command_cancel,
+    dispatch_permission_decision,
+)
+from apps.commands.models import (
+    Command,
+    CommandStatus,
+    PermissionDecision,
+    PermissionRequest,
+)
+from apps.commands.serializers import (
+    CommandCreateSerializer,
+    CommandSerializer,
+    PermissionDecisionSerializer,
+    PermissionRequestSerializer,
+)
 from apps.commands.services import reap_stale_commands
 
 
 class CommandViewSet(viewsets.GenericViewSet[Command]):
     queryset = Command.objects.select_related("agent", "conversation").prefetch_related(
-        "events"
+        "events", "permission_requests"
     )
 
     def get_queryset(self) -> Any:
@@ -62,6 +78,73 @@ class CommandViewSet(viewsets.GenericViewSet[Command]):
         dispatch_command(command)
         output = CommandSerializer(command)
         return response.Response(output.data, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="permissions/(?P<request_id>[^/.]+)",
+    )
+    def permissions(
+        self,
+        request: Any,
+        pk: str | None = None,
+        request_id: str | None = None,
+    ) -> response.Response:
+        """Answer a tool-approval question Claude Code is blocked on."""
+        command = self.get_object()
+        serializer = PermissionDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            permission_request = command.permission_requests.get(
+                request_id=str(request_id)
+            )
+        except (PermissionRequest.DoesNotExist, ValidationError, ValueError):
+            return response.Response(
+                {"detail": "Unknown permission request."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not permission_request.is_pending:
+            return response.Response(
+                {"detail": f"Already {permission_request.decision}."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        allowed = serializer.validated_data["behavior"] == "allow"
+        permission_request.decision = (
+            PermissionDecision.ALLOWED if allowed else PermissionDecision.DENIED
+        )
+        permission_request.decision_message = serializer.validated_data["message"]
+        permission_request.decided_by = request.user
+        permission_request.decided_at = timezone.now()
+        permission_request.save(
+            update_fields=[
+                "decision",
+                "decision_message",
+                "decided_by",
+                "decided_at",
+            ]
+        )
+
+        dispatch_permission_decision(
+            command,
+            request_id=str(permission_request.request_id),
+            allowed=allowed,
+            message=permission_request.decision_message,
+        )
+
+        # The agent drives the command back to `running` when the turn resumes;
+        # reflecting it here keeps the UI from looking stuck in the meantime.
+        # `started_at` restarts too: the operator's thinking time must not eat
+        # into the command's own timeout budget.
+        if command.status == CommandStatus.WAITING_USER_ACTION:
+            command.status = CommandStatus.RUNNING
+            command.started_at = timezone.now()
+            command.save(update_fields=["status", "started_at", "updated_at"])
+            publish_command_updated(command)
+
+        return response.Response(PermissionRequestSerializer(permission_request).data)
 
     @action(detail=True, methods=["post"], url_path="cancel")
     def cancel(self, request: Any, pk: str | None = None) -> response.Response:

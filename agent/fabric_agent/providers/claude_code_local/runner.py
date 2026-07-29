@@ -3,10 +3,16 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import sys
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from fabric_agent.permissions.gateway import (
+    MCP_SERVER_NAME,
+    PERMISSION_PROMPT_TOOL,
+)
 
 # Claude Code emits one JSON document per line in `stream-json` mode. A single
 # line can carry a full tool result, which easily exceeds the 64 KiB default
@@ -26,6 +32,33 @@ ProcessObserver = Callable[[asyncio.subprocess.Process], None]
 
 
 @dataclass(slots=True, frozen=True)
+class PermissionPrompt:
+    """Where the CLI should send permission questions instead of prompting."""
+
+    port: int
+    token: str
+    command_id: str
+
+    def mcp_config(self) -> str:
+        return json.dumps(
+            {
+                "mcpServers": {
+                    MCP_SERVER_NAME: {
+                        "type": "stdio",
+                        "command": sys.executable,
+                        "args": ["-m", "fabric_agent.permission_broker"],
+                        "env": {
+                            "FABRIC_PERMISSION_PORT": str(self.port),
+                            "FABRIC_PERMISSION_TOKEN": self.token,
+                            "FABRIC_PERMISSION_COMMAND_ID": self.command_id,
+                        },
+                    }
+                }
+            }
+        )
+
+
+@dataclass(slots=True, frozen=True)
 class ClaudeCodeExecutionRequest:
     prompt: str
     session_id: str | None = None
@@ -35,6 +68,7 @@ class ClaudeCodeExecutionRequest:
     model: str | None = None
     allowed_tools: tuple[str, ...] = field(default_factory=tuple)
     disallowed_tools: tuple[str, ...] = field(default_factory=tuple)
+    permission_prompt: PermissionPrompt | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -226,6 +260,17 @@ class ClaudeCodeCliRunner:
             args.extend(["--allowed-tools", *request.allowed_tools])
         if request.disallowed_tools:
             args.extend(["--disallowed-tools", *request.disallowed_tools])
+        if request.permission_prompt is not None:
+            # Routes every approval to the Fabric UI instead of denying it
+            # outright, which is what `-p` does without a prompt tool.
+            args.extend(
+                [
+                    "--mcp-config",
+                    request.permission_prompt.mcp_config(),
+                    "--permission-prompt-tool",
+                    PERMISSION_PROMPT_TOOL,
+                ]
+            )
         return args
 
 

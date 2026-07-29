@@ -14,11 +14,17 @@ from apps.agents.events import (
     publish_agent_updated,
     publish_command_event,
     publish_command_updated,
+    publish_permission_request,
 )
 from apps.agents.models import Agent, AgentStatus
 from apps.agents.services import dispatch_pending_commands, update_agent_presence
 from apps.api_auth.websocket_auth import authenticate_events_user
-from apps.commands.models import Command, CommandEvent, CommandStatus
+from apps.commands.models import (
+    Command,
+    CommandEvent,
+    CommandStatus,
+    PermissionRequest,
+)
 from apps.conversations.services import (
     sync_message_for_command_completed,
     sync_message_for_command_failed,
@@ -137,6 +143,10 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
             await sync_to_async(self._append_command_event)(envelope.payload)
             return
 
+        if message_type == "session.action_required":
+            await sync_to_async(self._register_permission_request)(envelope.payload)
+            return
+
         if message_type == "command.completed":
             await sync_to_async(self._mark_command_completed)(envelope.payload)
             return
@@ -148,6 +158,9 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         await self.send_json(event["message"])
 
     async def command_cancel(self, event: dict[str, object]) -> None:
+        await self.send_json(event["message"])
+
+    async def session_action_response(self, event: dict[str, object]) -> None:
         await self.send_json(event["message"])
 
     def _mark_offline(self) -> None:
@@ -254,6 +267,31 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         )
         sync_message_for_command_progress(command, str(payload.get("delta", "")))
         publish_command_event(command, command_event)
+
+    def _register_permission_request(self, payload: dict[str, object]) -> None:
+        """Record a tool call the agent is blocked on, and surface it."""
+        command = self._load_command(
+            payload.get("command_id"), CommandStatus.WAITING_USER_ACTION
+        )
+        if command is None:
+            return
+
+        request, created = PermissionRequest.objects.get_or_create(
+            request_id=str(payload.get("request_id", "")),
+            defaults={
+                "command": command,
+                "tool_name": str(payload.get("tool_name", "")),
+                "tool_input": payload.get("input") or {},
+                "tool_use_id": str(payload.get("tool_use_id") or ""),
+            },
+        )
+        if not created:
+            return
+
+        command.status = CommandStatus.WAITING_USER_ACTION
+        command.save(update_fields=["status", "updated_at"])
+        publish_permission_request(command, request)
+        publish_command_updated(command)
 
     def _mark_command_completed(self, payload: dict[str, object]) -> None:
         command = self._load_command(

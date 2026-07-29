@@ -14,6 +14,7 @@ import { firstValueFrom, Subscription } from 'rxjs';
 import { TerminalModule, TerminalService } from 'primeng/terminal';
 
 import { Agent, AuthSession, Command, CommandStatus, FabricEvent } from './models';
+
 import { AgentService } from './services/agent.service';
 import { AuthService } from './services/auth.service';
 import { CommandService } from './services/command.service';
@@ -36,7 +37,15 @@ const CLAUDE_PROVIDER = 'claude_code_local';
 const POWERSHELL_PROVIDER = 'windows_powershell';
 const CLAUDE_TIMEOUT_SECONDS = 600;
 const CLAUDE_PERMISSION_MODES = new Set(['acceptEdits', 'auto', 'bypassPermissions', 'manual', 'plan', 'default']);
-const DEFAULT_CLAUDE_PERMISSION_MODE = 'acceptEdits';
+// `default` routes every approval through Fabric's permission bridge instead of
+// granting them up front. Switch to `acceptEdits` to stop being asked.
+const DEFAULT_CLAUDE_PERMISSION_MODE = 'default';
+
+interface PendingPermission {
+  requestId: string;
+  toolName: string;
+  toolInput: Record<string, unknown>;
+}
 
 @Component({
   selector: 'fabric-root',
@@ -417,6 +426,7 @@ export class AppComponent implements OnDestroy {
   readonly loginError = signal('');
   readonly claudeSessionId = signal<string | null>(null);
   readonly claudePermissionMode = signal(DEFAULT_CLAUDE_PERMISSION_MODE);
+  readonly pendingPermission = signal<PendingPermission | null>(null);
 
   private activeCommandSawProgress = false;
   private activeCommandLastSequence = 0;
@@ -544,6 +554,9 @@ export class AppComponent implements OnDestroy {
   }
 
   terminalPrompt(): string {
+    if (this.pendingPermission() !== null) {
+      return 'allow / deny ?';
+    }
     const target = this.powerShellSessionId() === null ? 'closed' : this.promptPath();
     const claudeMarker = this.claudeSessionId() === null ? '' : ':claude';
     if (this.activeCommandId() !== null) {
@@ -553,7 +566,9 @@ export class AppComponent implements OnDestroy {
   }
 
   shouldHidePromptWhileRunning(): boolean {
-    return this.activeCommandId() !== null;
+    // Keep the prompt visible while a permission is pending: it is the only way
+    // to answer.
+    return this.activeCommandId() !== null && this.pendingPermission() === null;
   }
 
   displayError(): string | null {
@@ -665,9 +680,101 @@ export class AppComponent implements OnDestroy {
       this.handleCommandEvent(event.payload);
       return;
     }
+    if (event.type === 'command.permission_request') {
+      this.handlePermissionRequest(event.payload);
+      return;
+    }
     if (event.type === 'command.updated') {
       this.handleCommandUpdated(event.payload);
     }
+  }
+
+  /** Claude Code is blocked on this tool call until the operator rules on it. */
+  private handlePermissionRequest(payload: Record<string, unknown>): void {
+    if (payload['command_id'] !== this.activeCommandId()) {
+      return;
+    }
+    const request = this.asRecord(payload['permission_request']);
+    if (request === null || typeof request['request_id'] !== 'string') {
+      return;
+    }
+    if (request['decision'] !== 'pending') {
+      return;
+    }
+
+    this.pendingPermission.set({
+      requestId: request['request_id'],
+      toolName: typeof request['tool_name'] === 'string' ? request['tool_name'] : 'tool',
+      toolInput: this.asRecord(request['tool_input']) ?? {},
+    });
+    this.appendTerminalLine(this.describePermissionRequest());
+  }
+
+  private describePermissionRequest(): string {
+    const pending = this.pendingPermission();
+    if (pending === null) {
+      return '';
+    }
+    const hint = this.summarizeToolInput(pending.toolInput);
+    return [
+      '',
+      `[?] Claude requests permission: ${pending.toolName}${hint}`,
+      '    allow           - run it',
+      '    deny [reason]   - refuse and tell Claude why',
+    ].join('\n');
+  }
+
+  private summarizeToolInput(input: Record<string, unknown>): string {
+    for (const key of ['command', 'file_path', 'path', 'pattern', 'url']) {
+      const value = input[key];
+      if (typeof value === 'string' && value.trim().length > 0) {
+        const firstLine = value.trim().split(/\r?\n/)[0];
+        return ` — ${firstLine.slice(0, 160)}`;
+      }
+    }
+    return '';
+  }
+
+  private async handlePermissionTerminalCommand(command: string): Promise<boolean> {
+    const pending = this.pendingPermission();
+    if (pending === null) {
+      return false;
+    }
+
+    const match = /^(allow|deny|y|n)(?:\s+([\s\S]*))?$/i.exec(command.trim());
+    if (match === null) {
+      this.terminalService.sendResponse(
+        'Claude is waiting for a decision. Answer with `allow` or `deny [reason]`.',
+      );
+      return true;
+    }
+
+    const verb = match[1].toLowerCase();
+    const allowed = verb === 'allow' || verb === 'y';
+    const reason = (match[2] ?? '').trim();
+    const commandId = this.activeCommandId();
+    if (commandId === null) {
+      this.pendingPermission.set(null);
+      return true;
+    }
+
+    this.pendingPermission.set(null);
+    try {
+      await firstValueFrom(
+        this.commandService.decidePermission(
+          commandId,
+          pending.requestId,
+          allowed ? 'allow' : 'deny',
+          reason,
+        ),
+      );
+      this.appendTerminalLine(allowed ? '[allowed]' : `[denied]${reason ? ` ${reason}` : ''}`);
+    } catch (error) {
+      const message = this.extractHttpError(error, 'Could not send the decision');
+      this.terminalError.set(message);
+      this.appendTerminalLine(message);
+    }
+    return true;
   }
 
   private async handleTerminalCommand(command: string): Promise<void> {
@@ -678,6 +785,12 @@ export class AppComponent implements OnDestroy {
     }
 
     this.recordHistory(trimmed);
+
+    // A blocked Claude turn owns the prompt: nothing else can run until it is
+    // answered, so this must come first.
+    if (await this.handlePermissionTerminalCommand(trimmed)) {
+      return;
+    }
 
     if (await this.handleClaudeTerminalCommand(trimmed)) {
       return;
@@ -965,6 +1078,18 @@ export class AppComponent implements OnDestroy {
       });
     }
 
+    // A permission can be raised while the browser is not listening (page
+    // reload, dropped socket): recover it from the command itself.
+    const pending = (command.permission_requests ?? []).find(
+      (request) => request.decision === 'pending',
+    );
+    if (pending !== undefined) {
+      this.handlePermissionRequest({
+        command_id: command.id,
+        permission_request: pending,
+      });
+    }
+
     if (FINAL_COMMAND_STATUSES.has(command.status)) {
       this.handleCommandUpdated({ command });
     }
@@ -1021,7 +1146,11 @@ export class AppComponent implements OnDestroy {
         '  claude            - show the current Claude context',
         '  claude:status     - probe the local Claude Code installation',
         '  claude:new        - start a new Claude session on the next prompt',
-        '  claude:mode <m>   - permission mode (acceptEdits, plan, …)',
+        '  claude:mode <m>   - permission mode (default, acceptEdits, plan, …)',
+        '',
+        'When Claude asks for permission:',
+        '  allow             - run the tool call',
+        '  deny [reason]     - refuse it and tell Claude why',
         '',
         'Anything else is executed in the PowerShell session.',
       ].join('\n'));
@@ -1180,6 +1309,7 @@ export class AppComponent implements OnDestroy {
   }
 
   private resetStreamingState(): void {
+    this.pendingPermission.set(null);
     this.activeCommandSawProgress = false;
     this.activeCommandLastSequence = 0;
     this.stdoutBuffer = '';

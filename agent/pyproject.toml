@@ -24,6 +24,7 @@ packages = [
   "fabric_agent",
   "fabric_agent.application",
   "fabric_agent.domain",
+  "fabric_agent.permissions",
   "fabric_agent.infrastructure",
   "fabric_agent.transport",
   "fabric_agent.providers",

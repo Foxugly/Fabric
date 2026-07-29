@@ -12,10 +12,12 @@ from apps.conversations.services import sync_message_for_command_failed
 
 LOGGER = logging.getLogger(__name__)
 
+#: `waiting_user_action` is deliberately absent: a command blocked on a human
+#: approval must not be killed by the clock. It ends when the operator answers,
+#: cancels, or the agent disconnects.
 ACTIVE_STATUSES = (
     CommandStatus.DISPATCHED,
     CommandStatus.RUNNING,
-    CommandStatus.WAITING_USER_ACTION,
 )
 
 

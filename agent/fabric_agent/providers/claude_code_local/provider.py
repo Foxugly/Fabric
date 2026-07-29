@@ -7,6 +7,7 @@ from typing import Any
 from shared.protocol import PROVIDER_ACTIONS
 
 from fabric_agent.domain.provider import Provider
+from fabric_agent.permissions.gateway import PermissionGateway
 from fabric_agent.providers.claude_code_local.detector import (
     ClaudeCodeSessionStatusDetector,
 )
@@ -27,9 +28,12 @@ class ClaudeCodeLocalProvider(Provider):
         self,
         status_detector: ClaudeCodeSessionStatusDetector | None = None,
         message_executor: ClaudeCodeMessageExecutor | None = None,
+        permission_gateway: PermissionGateway | None = None,
     ) -> None:
         self._status_detector = status_detector or ClaudeCodeSessionStatusDetector()
-        self._message_executor = message_executor or ClaudeCodeMessageExecutor()
+        self._message_executor = message_executor or ClaudeCodeMessageExecutor(
+            permission_gateway=permission_gateway
+        )
         self._result_cache: dict[str, dict[str, Any]] = {}
         self._session_locks: dict[str, asyncio.Lock] = {}
 
