@@ -5,9 +5,10 @@ import contextlib
 import json
 import logging
 import platform
+import ssl
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from uuid import uuid4
 
 from shared.protocol import build_message, parse_message
@@ -79,7 +80,10 @@ class AgentWebSocketClient:
         query = urlencode(
             {"agent_id": self._config.agent_id, "token": self._config.agent_token}
         )
-        async with connect(f"{self._config.server_ws_url}?{query}") as websocket:
+        async with connect(
+            f"{self._config.server_ws_url}?{query}",
+            ssl=_ssl_context(self._config.server_ws_url),
+        ) as websocket:
             self._websocket = websocket
             await self._send_hello(websocket)
             await self._send_capabilities(websocket)
@@ -364,6 +368,28 @@ class AgentWebSocketClient:
                 )
             )
         )
+
+
+def _ssl_context(server_ws_url: str) -> ssl.SSLContext | None:
+    """TLS trust for the outbound connection, independent of the OS store.
+
+    Windows still ships `DST Root CA X3`, expired since 2021-09-30. OpenSSL
+    happily builds a path through that cross-sign instead of stopping at the
+    valid `ISRG Root X1`, so every Let's Encrypt host is rejected with
+    "certificate has expired" — while browsers and curl succeed, which makes it
+    look like a server problem. The agent runs on machines whose root store we
+    do not control, so it carries a curated bundle instead.
+
+    Returns None for plain `ws://`, where TLS does not apply.
+    """
+    if urlparse(server_ws_url).scheme != "wss":
+        return None
+    try:
+        import certifi
+    except ImportError:  # pragma: no cover - certifi is a declared dependency
+        LOGGER.warning("certifi is missing, falling back to the OS trust store")
+        return ssl.create_default_context()
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 def _coerce_message(raw_message: Any) -> dict[str, Any]:

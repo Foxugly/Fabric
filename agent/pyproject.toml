@@ -8,6 +8,9 @@ version = "0.1.0"
 description = "Fabric Windows agent"
 requires-python = ">=3.12"
 dependencies = [
+  # A curated CA bundle: the OS trust store on the machines this agent runs on
+  # cannot be relied upon (see `_ssl_context` in transport/client.py).
+  "certifi>=2024.7.4",
   "websockets>=13.0,<15.0",
 ]
 
