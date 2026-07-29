@@ -172,12 +172,11 @@ async def test_windows_powershell_status_reports_availability() -> None:
 async def test_windows_powershell_executes_whitelisted_actions() -> None:
     provider = FakeProvider()
 
-    system_info = await provider.execute("windows_powershell.system.info", {})
-    process_list = await provider.execute(
-        "windows_powershell.process.list",
+    system_info = await provider.execute("system.info", {})
+    process_list = await provider.execute("process.list",
         {"name_like": "python*"},
     )
-    claude_version = await provider.execute("windows_powershell.claude.version", {})
+    claude_version = await provider.execute("claude.version", {})
 
     assert system_info["computer_name"] == "PC-1"
     assert process_list["processes"][0]["name"] == "python"
@@ -191,7 +190,7 @@ async def test_windows_powershell_rejects_unknown_action() -> None:
     provider = FakeProvider()
 
     with pytest.raises(NotImplementedError):
-        await provider.execute("windows_powershell.shell.run", {})
+        await provider.execute("shell.run", {})
 
 
 @pytest.mark.asyncio
@@ -201,8 +200,7 @@ async def test_windows_powershell_rejects_unsafe_name_filter() -> None:
     )
 
     with pytest.raises(PowerShellExecutionError):
-        await provider.execute(
-            "windows_powershell.process.list",
+        await provider.execute("process.list",
             {"name_like": "python; Remove-Item C:\\"},
         )
 
@@ -214,20 +212,17 @@ async def test_windows_powershell_command_stream_caches_final_result() -> None:
         session_manager=FakeSessionManager(),
     )
 
-    await provider.execute(
-        "windows_powershell.session.create",
+    await provider.execute("session.create",
         {"working_directory": "C:\\work"},
     )
 
     progress_events = [
         event
-        async for event in provider.stream(
-            "windows_powershell.command.run",
+        async for event in provider.stream("command.run",
             {"session_id": "session-1", "command": "Get-Location"},
         )
     ]
-    result = await provider.execute(
-        "windows_powershell.command.run",
+    result = await provider.execute("command.run",
         {"session_id": "session-1", "command": "Get-Location"},
     )
 

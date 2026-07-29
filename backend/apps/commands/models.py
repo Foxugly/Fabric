@@ -5,6 +5,7 @@ from uuid import uuid4
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from shared.protocol import all_qualified_actions
 
 
 class CommandStatus(models.TextChoices):
@@ -18,19 +19,9 @@ class CommandStatus(models.TextChoices):
     TIMED_OUT = "timed_out", "Timed out"
 
 
-ALLOWED_ACTIONS = {
-    "echo.message.send",
-    "claude_code_local.session.status",
-    "claude_code_local.message.send",
-    "windows_powershell.system.info",
-    "windows_powershell.process.list",
-    "windows_powershell.claude.version",
-    "windows_powershell.session.create",
-    "windows_powershell.session.status",
-    "windows_powershell.session.close",
-    "windows_powershell.command.run",
-    "windows_powershell.network.recover",
-}
+#: Derived from `shared/protocol/actions.py` so the API and the agent can never
+#: disagree on what a valid action is.
+ALLOWED_ACTIONS = all_qualified_actions()
 
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     str(CommandStatus.PENDING): {

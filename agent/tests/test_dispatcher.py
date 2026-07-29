@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import pytest
@@ -31,7 +31,7 @@ class ExecuteOnlyProvider(Provider):
         self,
         action: str,
         payload: dict[str, Any],
-    ) -> AsyncIterator[dict[str, Any]]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         raise NotImplementedError
 
 
@@ -43,6 +43,17 @@ class StubRegistry:
         return self._provider
 
 
+class RecordingProvider(ExecuteOnlyProvider):
+    name = "claude_code_local"
+
+    def __init__(self) -> None:
+        self.seen_actions: list[str] = []
+
+    async def execute(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self.seen_actions.append(action)
+        return {"status": "ok"}
+
+
 @pytest.mark.asyncio
 async def test_dispatcher_tolerates_provider_without_stream() -> None:
     dispatcher = CommandDispatcher(StubRegistry(ExecuteOnlyProvider()))  # type: ignore[arg-type]
@@ -52,3 +63,16 @@ async def test_dispatcher_tolerates_provider_without_stream() -> None:
 
     assert events == []
     assert result == {"status": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_strips_the_provider_namespace_from_actions() -> None:
+    provider = RecordingProvider()
+    dispatcher = CommandDispatcher(StubRegistry(provider))  # type: ignore[arg-type]
+
+    await dispatcher.execute(
+        "claude_code_local", "claude_code_local.message.send", {}
+    )
+    await dispatcher.execute("claude_code_local", "message.send", {})
+
+    assert provider.seen_actions == ["message.send", "message.send"]

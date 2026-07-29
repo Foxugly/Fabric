@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from fabric_agent.domain.provider import Provider
@@ -24,15 +24,15 @@ class WindowsPowerShellProvider(Provider):
     """Safe Windows PowerShell adapter with explicit whitelisted actions only."""
 
     name = "windows_powershell"
-    _capabilities = (
-        "windows_powershell.system.info",
-        "windows_powershell.process.list",
-        "windows_powershell.claude.version",
-        "windows_powershell.session.create",
-        "windows_powershell.session.status",
-        "windows_powershell.session.close",
-        "windows_powershell.command.run",
-        "windows_powershell.network.recover",
+    actions = (
+        "system.info",
+        "process.list",
+        "claude.version",
+        "session.create",
+        "session.status",
+        "session.close",
+        "command.run",
+        "network.recover",
     )
 
     def __init__(
@@ -62,36 +62,33 @@ class WindowsPowerShellProvider(Provider):
             ),
         }
 
-    async def get_capabilities(self) -> list[str]:
-        return list(self._capabilities)
-
     async def execute(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
-        if action == "windows_powershell.command.run":
+        if action == "command.run":
             stream_key = _stream_key(action, payload)
             cached_result = self._stream_results.pop(stream_key, None)
             if cached_result is not None:
                 return cached_result
 
-        if action == "windows_powershell.system.info":
+        if action == "system.info":
             return await self._run_system_info(payload)
-        if action == "windows_powershell.process.list":
+        if action == "process.list":
             return await self._run_process_list(payload)
-        if action == "windows_powershell.claude.version":
+        if action == "claude.version":
             return await self._run_claude_version(payload)
-        if action == "windows_powershell.session.create":
+        if action == "session.create":
             return await self._run_session_create(payload)
-        if action == "windows_powershell.session.status":
+        if action == "session.status":
             return await self._run_session_status(payload)
-        if action == "windows_powershell.session.close":
+        if action == "session.close":
             return await self._run_session_close(payload)
-        if action == "windows_powershell.command.run":
+        if action == "command.run":
             return await self._run_command(payload)
-        if action == "windows_powershell.network.recover":
+        if action == "network.recover":
             return await self._run_network_recover(payload)
         raise NotImplementedError(f"Unsupported windows_powershell action: {action}")
 
     async def cancel(self, action: str, payload: dict[str, Any]) -> None:
-        if action != "windows_powershell.command.run":
+        if action != "command.run":
             raise NotImplementedError
         await self._session_manager.cancel_running_command(
             _required_session_id(payload)
@@ -101,9 +98,9 @@ class WindowsPowerShellProvider(Provider):
         self,
         action: str,
         payload: dict[str, Any],
-    ) -> AsyncIterator[dict[str, Any]]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         command = payload.get("command")
-        if action != "windows_powershell.command.run":
+        if action != "command.run":
             raise NotImplementedError
         if not isinstance(command, str) or not command.strip():
             raise NotImplementedError

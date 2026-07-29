@@ -1,29 +1,30 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from rest_framework import serializers
+from shared.protocol import qualified_actions_by_provider
 
 from apps.agents.models import Agent
+from apps.agents.views import visible_agents_for
 from apps.commands.models import ALLOWED_ACTIONS, Command, CommandEvent
 
-ALLOWED_PROVIDER_ACTIONS: dict[str, set[str]] = {
-    "echo": {"echo.message.send"},
-    "claude_code_local": {
-        "claude_code_local.session.status",
-        "claude_code_local.message.send",
-    },
-    "windows_powershell": {
-        "windows_powershell.system.info",
-        "windows_powershell.process.list",
-        "windows_powershell.claude.version",
-        "windows_powershell.session.create",
-        "windows_powershell.session.status",
-        "windows_powershell.session.close",
-        "windows_powershell.command.run",
-        "windows_powershell.network.recover",
-    },
-}
+ALLOWED_PROVIDER_ACTIONS: dict[str, set[str]] = qualified_actions_by_provider()
+
+
+def resolve_owned_agent(context: Mapping[str, Any], agent_id: Any) -> Agent:
+    """Resolve an agent the caller is actually allowed to drive.
+
+    Unknown and not-yours are deliberately indistinguishable: an agent id is a
+    capability, and confirming its existence to a stranger is already a leak.
+    """
+    request = context.get("request")
+    user = getattr(request, "user", None)
+    try:
+        return visible_agents_for(user).get(id=agent_id)
+    except Agent.DoesNotExist as exc:
+        raise serializers.ValidationError({"agent_id": "Unknown agent"}) from exc
 
 
 class CommandEventSerializer(serializers.ModelSerializer[CommandEvent]):
@@ -78,11 +79,7 @@ class CommandCreateSerializer(serializers.Serializer[dict[str, Any]]):
     timeout_seconds = serializers.IntegerField(min_value=1, max_value=3600, default=120)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        agent_id = attrs["agent_id"]
-        try:
-            attrs["agent"] = Agent.objects.get(id=agent_id)
-        except Agent.DoesNotExist as exc:
-            raise serializers.ValidationError({"agent_id": "Unknown agent"}) from exc
+        attrs["agent"] = resolve_owned_agent(self.context, attrs["agent_id"])
         provider = attrs["provider"]
         action = attrs["action"]
         if provider not in ALLOWED_PROVIDER_ACTIONS:

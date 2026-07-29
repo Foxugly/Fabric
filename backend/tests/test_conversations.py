@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any, cast
 
 import pytest
 from asgiref.sync import sync_to_async
@@ -14,6 +15,17 @@ from apps.agents.models import Agent
 from apps.commands.models import CommandStatus
 from apps.conversations.models import MessageRole, MessageStatus
 from config.asgi import application
+
+
+async def _receive_event_type(
+    communicator: WebsocketCommunicator,
+    expected_type: str,
+) -> dict[str, Any]:
+    for _ in range(8):
+        event = cast(dict[str, Any], await communicator.receive_json_from())
+        if event["type"] == expected_type:
+            return event
+    raise AssertionError(f"Did not receive event type {expected_type}")
 
 
 @pytest.mark.django_db
@@ -51,6 +63,7 @@ async def test_message_create_dispatches_command_and_updates_assistant_message(
         username="conversation-user",
         password="conversation-password",
     )
+    await Agent.objects.filter(id=agent.id).aupdate(owner=user)
     user_token = await Token.objects.acreate(user=user)
 
     agent_communicator = WebsocketCommunicator(
@@ -151,7 +164,9 @@ async def test_message_create_dispatches_command_and_updates_assistant_message(
     assert messages_payload[1]["status"] == MessageStatus.SUCCEEDED
     assert messages_payload[1]["content"] == "Bonjour Fabric"
 
-    command_event = await event_communicator.receive_json_from()
+    # Agent presence and command updates share the per-user event group, so the
+    # interleaving is not deterministic: select by type rather than by position.
+    command_event = await _receive_event_type(event_communicator, "command.updated")
     assert command_event["type"] == "command.updated"
     assert command_event["payload"]["command"]["status"] in {
         CommandStatus.DISPATCHED,

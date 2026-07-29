@@ -33,7 +33,23 @@ def sync_message_for_command_completed(command: Command) -> None:
         message.content = result_text
     message.status = MessageStatus.SUCCEEDED
     message.save(update_fields=["status", "content", "updated_at"])
+    _capture_provider_session(command)
     _touch_conversation(message)
+
+
+def _capture_provider_session(command: Command) -> None:
+    """Remember the provider session so the next message continues this thread.
+
+    Claude Code can return a different `session_id` for a resumed turn, so the
+    latest one always wins.
+    """
+    session_id = command.result.get("session_id")
+    if command.conversation is None or not isinstance(session_id, str):
+        return
+    if command.conversation.external_id == session_id:
+        return
+    command.conversation.external_id = session_id
+    command.conversation.save(update_fields=["external_id", "updated_at"])
 
 
 def sync_message_for_command_failed(command: Command) -> None:

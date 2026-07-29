@@ -183,30 +183,25 @@ async def test_windows_powershell_persistent_session_lifecycle() -> None:
         session_manager=FakeSessionManager(),
     )
 
-    created = await provider.execute(
-        "windows_powershell.session.create",
+    created = await provider.execute("session.create",
         {"working_directory": "C:\\work"},
     )
     session_id = created["session"]["session_id"]
 
-    await provider.execute(
-        "windows_powershell.command.run",
+    await provider.execute("command.run",
         {
             "session_id": session_id,
             "operation": "set_location",
             "path": "C:\\other",
         },
     )
-    location = await provider.execute(
-        "windows_powershell.command.run",
+    location = await provider.execute("command.run",
         {"session_id": session_id, "operation": "get_location"},
     )
-    status = await provider.execute(
-        "windows_powershell.session.status",
+    status = await provider.execute("session.status",
         {"session_id": session_id},
     )
-    closed = await provider.execute(
-        "windows_powershell.session.close",
+    closed = await provider.execute("session.close",
         {"session_id": session_id},
     )
 
@@ -222,22 +217,18 @@ async def test_windows_powershell_persistent_session_diagnostic_operations() -> 
         session_manager=FakeSessionManager(),
     )
 
-    created = await provider.execute(
-        "windows_powershell.session.create",
+    created = await provider.execute("session.create",
         {"working_directory": "C:\\work"},
     )
     session_id = created["session"]["session_id"]
 
-    network_status = await provider.execute(
-        "windows_powershell.command.run",
+    network_status = await provider.execute("command.run",
         {"session_id": session_id, "operation": "get_network_status"},
     )
-    python_status = await provider.execute(
-        "windows_powershell.command.run",
+    python_status = await provider.execute("command.run",
         {"session_id": session_id, "operation": "get_python_process_status"},
     )
-    file_summary = await provider.execute(
-        "windows_powershell.command.run",
+    file_summary = await provider.execute("command.run",
         {
             "session_id": session_id,
             "operation": "get_file_summary",
@@ -257,14 +248,12 @@ async def test_windows_powershell_persistent_session_allows_terminal_command() -
         session_manager=FakeSessionManager(),
     )
 
-    created = await provider.execute(
-        "windows_powershell.session.create",
+    created = await provider.execute("session.create",
         {"working_directory": "C:\\work"},
     )
     session_id = created["session"]["session_id"]
 
-    result = await provider.execute(
-        "windows_powershell.command.run",
+    result = await provider.execute("command.run",
         {"session_id": session_id, "command": "Get-Location"},
     )
 

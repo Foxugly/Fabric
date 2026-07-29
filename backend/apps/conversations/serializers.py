@@ -5,6 +5,7 @@ from typing import Any
 from rest_framework import serializers
 
 from apps.agents.models import Agent
+from apps.commands.serializers import resolve_owned_agent
 from apps.conversations.models import Conversation, Message
 
 
@@ -41,10 +42,7 @@ class ConversationCreateSerializer(serializers.Serializer[dict[str, Any]]):
     title = serializers.CharField(max_length=255, required=False, allow_blank=True)
 
     def validate_agent_id(self, value: str) -> Agent:
-        try:
-            return Agent.objects.get(id=value)
-        except Agent.DoesNotExist as exc:
-            raise serializers.ValidationError("Unknown agent") from exc
+        return resolve_owned_agent(self.context, value)
 
 
 class MessageSerializer(serializers.ModelSerializer[Message]):

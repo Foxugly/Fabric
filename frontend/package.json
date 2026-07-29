@@ -6,7 +6,7 @@
   "scripts": {
     "start": "ng serve",
     "build": "ng build",
-    "lint": "ng lint"
+    "typecheck": "tsc -p tsconfig.app.json --noEmit"
   },
   "dependencies": {
     "@angular/cdk": "^21.2.14",

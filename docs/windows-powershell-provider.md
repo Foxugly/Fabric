@@ -10,9 +10,14 @@ This provider supports:
 
 - one-shot safe diagnostic actions
 - persistent PowerShell sessions with state
+- **arbitrary PowerShell commands inside a persistent session**
 - optional local network recovery actions
 
-It does **not** expose an arbitrary remote shell.
+> **This provider IS an arbitrary remote shell.** `windows_powershell.command.run`
+> accepts a free-form `command` string and evaluates it through
+> `[scriptblock]::Create()` in the persistent session. Anyone who can create a
+> command for an agent can run any code as the agent's Windows user. See
+> [Security model](#security-model).
 
 ## One-shot actions
 
@@ -96,9 +101,31 @@ Response shape:
 }
 ```
 
+## Raw commands
+
+`windows_powershell.command.run` accepts a free-form `command` and streams its
+output back as `terminal.stdout` / `terminal.stderr` progress events. This is what
+the Fabric terminal UI uses for every line that is not a local or `claude` command.
+
+```json
+{
+  "provider": "windows_powershell",
+  "action": "windows_powershell.command.run",
+  "payload": {
+    "session_id": "uuid",
+    "command": "git status",
+    "timeout_seconds": 60
+  }
+}
+```
+
+The command runs with the privileges of the account running the agent. There is
+no allow-list, no sandbox and no path restriction.
+
 ## Persistent session operations
 
-`windows_powershell.command.run` currently supports these `operation` values:
+When `command` is absent, `windows_powershell.command.run` falls back to a
+structured `operation`. These are the constrained, parameter-validated helpers:
 
 - `get_location`
 - `set_location`
@@ -149,12 +176,25 @@ By default, network recovery is disabled.
 
 ## Security model
 
-The provider is intentionally constrained:
+Only the **structured `operation` path** is constrained:
 
-- no arbitrary PowerShell script payload
-- no arbitrary shell command payload
-- only explicit whitelisted actions and operations
-- timeouts enforced on operations
+- parameters are validated and quoted with `_ps_quote`
+- `name_like`, `log_name`, `max_items` are pattern- or range-checked
+- timeouts are enforced (1 to 120 seconds)
 - session access is keyed by `session_id`
 
-If a true arbitrary persistent console is required later, that should be treated as a separate high-risk mode.
+The **raw `command` path is not constrained at all**. Treat an agent that
+registers this provider as equivalent to an open remote shell on that Windows
+machine, and secure it accordingly:
+
+- the Fabric API is the authorisation boundary — anyone who can drive an agent
+  owns the machine it runs on;
+- an agent belongs to a user: only its owner may see it, drive it or mint its
+  tokens. **Staff accounts bypass this and see every agent**, so grant
+  `is_staff` to yourself only;
+- run the agent as an unprivileged Windows account, never as an administrator;
+- the agent's development token is a bearer credential; rotate it with
+  `POST /api/v1/agents/<id>/development-token` and revoke with `.../revoke`;
+- serve Fabric over HTTPS. Outside `DJANGO_DEBUG=true` the backend refuses to
+  start without `DJANGO_SECRET_KEY` and enables HSTS, secure cookies and an
+  HTTPS redirect.

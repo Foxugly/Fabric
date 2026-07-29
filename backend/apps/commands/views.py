@@ -9,6 +9,7 @@ from apps.agents.events import publish_command_updated
 from apps.agents.services import dispatch_command, dispatch_command_cancel
 from apps.commands.models import Command, CommandStatus
 from apps.commands.serializers import CommandCreateSerializer, CommandSerializer
+from apps.commands.services import reap_stale_commands
 
 
 class CommandViewSet(viewsets.GenericViewSet[Command]):
@@ -17,6 +18,9 @@ class CommandViewSet(viewsets.GenericViewSet[Command]):
     )
 
     def get_queryset(self) -> Any:
+        # Opportunistic reaping: Fabric has no scheduler, and a stuck command
+        # must not survive a page refresh.
+        reap_stale_commands()
         return (
             super()
             .get_queryset()
@@ -41,7 +45,10 @@ class CommandViewSet(viewsets.GenericViewSet[Command]):
         return response.Response(serializer.data)
 
     def create(self, request: Any) -> response.Response:
-        serializer = CommandCreateSerializer(data=request.data)
+        serializer = CommandCreateSerializer(
+            data=request.data,
+            context=self.get_serializer_context(),
+        )
         serializer.is_valid(raise_exception=True)
         command = Command.objects.create(
             requested_by=request.user,

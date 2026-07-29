@@ -11,8 +11,12 @@ from apps.commands.serializers import CommandEventSerializer, CommandSerializer
 
 
 def publish_agent_updated(agent: Agent) -> None:
+    # Agent presence is only broadcast to its owner: an ownerless agent is
+    # staff-only and has nobody to notify.
+    if agent.owner_id is None:
+        return
     _publish_to_group(
-        group_name="events.agents",
+        group_name=f"events.user.{agent.owner_id}",
         message_type="agent.updated",
         correlation_id=str(agent.id),
         payload={"agent": AgentSerializer(agent).data},

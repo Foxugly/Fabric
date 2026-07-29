@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 from shared.protocol import ProtocolValidationError, build_message, parse_message
 
@@ -24,6 +26,8 @@ from apps.conversations.services import (
     sync_message_for_command_started,
 )
 
+LOGGER = logging.getLogger(__name__)
+
 
 class EventConsumer(AsyncJsonWebsocketConsumer):
     user_id: int | None = None
@@ -35,14 +39,12 @@ class EventConsumer(AsyncJsonWebsocketConsumer):
             return
 
         self.user_id = int(user.id)
-        await self.channel_layer.group_add("events.agents", self.channel_name)
         await self.channel_layer.group_add(
             f"events.user.{self.user_id}", self.channel_name
         )
         await self.accept()
 
     async def disconnect(self, close_code: int) -> None:
-        await self.channel_layer.group_discard("events.agents", self.channel_name)
         if self.user_id is not None:
             await self.channel_layer.group_discard(
                 f"events.user.{self.user_id}",
@@ -153,7 +155,31 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
             return
         agent = Agent.objects.get(id=self.agent.id)
         agent.mark_offline()
+        self._fail_in_flight_commands(agent)
         publish_agent_updated(agent)
+
+    @staticmethod
+    def _fail_in_flight_commands(agent: Agent) -> None:
+        """Nothing will ever report on these again: don't leave them running."""
+        in_flight = list(
+            Command.objects.filter(
+                agent=agent,
+                status__in=[
+                    CommandStatus.DISPATCHED,
+                    CommandStatus.RUNNING,
+                    CommandStatus.WAITING_USER_ACTION,
+                ],
+            )
+        )
+        for command in in_flight:
+            command.status = CommandStatus.FAILED
+            command.error = "Agent disconnected before the command completed"
+            command.finished_at = timezone.now()
+            command.save(
+                update_fields=["status", "error", "finished_at", "updated_at"]
+            )
+            sync_message_for_command_failed(command)
+            publish_command_updated(command)
 
     def _touch_agent(self) -> None:
         if self.agent is None:
@@ -171,8 +197,41 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         agent.save(update_fields=["capabilities", "updated_at"])
         publish_agent_updated(agent)
 
+    def _load_command(
+        self,
+        command_id: object,
+        next_status: str | None = None,
+    ) -> Command | None:
+        """Load a command this agent is allowed to report on.
+
+        Scoping on `agent` matters: without it any authenticated agent could
+        write results into any other agent's commands just by guessing an id.
+        `next_status` additionally enforces the documented state machine, so a
+        late or replayed message cannot resurrect a finished command.
+        """
+        if self.agent is None:
+            return None
+        try:
+            command = Command.objects.get(id=str(command_id), agent_id=self.agent.id)
+        except (Command.DoesNotExist, ValidationError, ValueError):
+            LOGGER.warning(
+                "Agent %s reported on unknown command %s", self.agent.id, command_id
+            )
+            return None
+        if next_status is not None and not command.can_transition_to(next_status):
+            LOGGER.warning(
+                "Ignoring %s -> %s for command %s",
+                command.status,
+                next_status,
+                command.id,
+            )
+            return None
+        return command
+
     def _mark_command_started(self, command_id: str) -> None:
-        command = Command.objects.get(id=command_id)
+        command = self._load_command(command_id, CommandStatus.RUNNING)
+        if command is None:
+            return
         command.status = CommandStatus.RUNNING
         command.started_at = timezone.now()
         command.save(update_fields=["status", "started_at", "updated_at"])
@@ -184,7 +243,9 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         publish_agent_updated(agent)
 
     def _append_command_event(self, payload: dict[str, object]) -> None:
-        command = Command.objects.get(id=str(payload["command_id"]))
+        command = self._load_command(payload.get("command_id"))
+        if command is None:
+            return
         command_event = CommandEvent.objects.create(
             command=command,
             sequence=int(str(payload.get("sequence", 0))),
@@ -195,7 +256,11 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         publish_command_event(command, command_event)
 
     def _mark_command_completed(self, payload: dict[str, object]) -> None:
-        command = Command.objects.get(id=str(payload["command_id"]))
+        command = self._load_command(
+            payload.get("command_id"), CommandStatus.SUCCEEDED
+        )
+        if command is None:
+            return
         command.status = CommandStatus.SUCCEEDED
         command.result = payload.get("result", {})
         command.finished_at = timezone.now()
@@ -208,11 +273,14 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         publish_agent_updated(agent)
 
     def _mark_command_failed(self, payload: dict[str, object]) -> None:
-        command = Command.objects.get(id=str(payload["command_id"]))
         is_cancelled = payload.get("cancelled") is True
-        command.status = (
+        next_status = (
             CommandStatus.CANCELLED if is_cancelled else CommandStatus.FAILED
         )
+        command = self._load_command(payload.get("command_id"), next_status)
+        if command is None:
+            return
+        command.status = next_status
         command.error = str(payload.get("error", "Unknown error"))
         command.finished_at = timezone.now()
         command.save(update_fields=["status", "error", "finished_at", "updated_at"])

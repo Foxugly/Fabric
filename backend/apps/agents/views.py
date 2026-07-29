@@ -11,10 +11,16 @@ from apps.agents.serializers import AgentCreateSerializer, AgentSerializer
 class AgentViewSet(viewsets.ModelViewSet[Agent]):
     queryset = Agent.objects.order_by("name")
 
+    def get_queryset(self) -> Any:
+        return visible_agents_for(self.request.user)
+
     def get_serializer_class(self) -> type[AgentSerializer | AgentCreateSerializer]:
         if self.action == "create":
             return AgentCreateSerializer
         return AgentSerializer
+
+    def perform_create(self, serializer: Any) -> None:
+        serializer.save(owner=self.request.user)
 
     @decorators.action(detail=True, methods=["post"], url_path="development-token")
     def development_token(
@@ -36,3 +42,16 @@ class AgentViewSet(viewsets.ModelViewSet[Agent]):
         agent.development_token_hash = ""
         agent.save(update_fields=["status", "development_token_hash", "updated_at"])
         return response.Response({"status": agent.status}, status=status.HTTP_200_OK)
+
+
+def visible_agents_for(user: Any) -> Any:
+    """Agents a user may see and drive.
+
+    Driving an agent means running code on someone's machine, so this is the
+    authorisation boundary for the whole product. Staff see everything,
+    including ownerless legacy agents; everyone else sees only their own.
+    """
+    agents = Agent.objects.order_by("name")
+    if getattr(user, "is_staff", False):
+        return agents
+    return agents.filter(owner_id=getattr(user, "id", None))

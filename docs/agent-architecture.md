@@ -1,82 +1,78 @@
 # Agent Architecture
 
-## Current state
+## Registered providers
 
-The current agent runtime supports one executable test provider:
+The agent runtime registers three providers ([registry.py](../agent/fabric_agent/application/registry.py)):
 
-- `echo`
+| Provider | Role |
+|---|---|
+| `claude_code_local` | drives the user's local Claude Code CLI |
+| `windows_powershell` | persistent PowerShell sessions and raw commands |
+| `echo` | transport test harness, no side effects |
 
-This provider exists to validate the transport chain:
+## Action namespace
+
+Actions are **fully qualified on the wire**: the API, the database
+(`ALLOWED_ACTIONS`), the protocol envelope and the advertised
+`agent.capabilities` all use `<provider>.<action>`, e.g.
+`claude_code_local.message.send`.
+
+The `CommandDispatcher` strips the provider prefix before calling the provider,
+so a provider only ever matches its own unqualified action (`message.send`).
+Adding a provider means implementing unqualified actions and advertising
+qualified capabilities — do not mix the two conventions inside a provider.
 
 ```text
-Fabric API -> WebSocket agent transport -> provider execution -> progress -> result
+API "claude_code_local.message.send"
+  -> protocol envelope (qualified)
+  -> CommandDispatcher.local_action() strips the prefix
+  -> ClaudeCodeLocalProvider.execute("message.send", payload)
 ```
 
-## Planned provider
+## Execution contract
 
-The target provider for the next real integration is:
+For each `command.request` the transport client:
 
-```text
-claude_code_local
-```
+1. answers `command.accepted`, then `command.started`;
+2. consumes `provider.stream(action, payload)` and forwards every yielded event
+   as `command.progress`;
+3. calls `provider.execute(action, payload)` for the final result and sends
+   `command.completed`, or `command.failed` on error.
 
-It is intentionally scaffolded but not registered as an active provider yet.
+Providers that stream therefore cache their final result during the stream so
+that `execute()` does not run the work twice. The stream is wrapped in
+`contextlib.aclosing` at both the dispatcher and client level: a provider may
+hold a lock across `yield` and must be finalised if the consumer stops early.
 
-## Why the provider is not registered yet
+Two payload keys are injected by the client and are reserved:
 
-The current code keeps `echo` as the only active provider because:
+- `_fabric_command_id` — identifies the command, used for cancellation
+- `_fabric_timeout_seconds` — the `timeout_seconds` of the `Command` row
 
-- the transport path is already validated by tests;
-- `claude_code_local` still needs a real session adapter;
-- exposing it before implementation would create a misleading capability surface.
+## `claude_code_local`
 
-## Planned internal structure
+The provider shells out to the `claude` CLI in print mode; it does not parse
+transcripts. Transcript files are only read for conservative session detection
+in `session.status`.
 
-The package lives at:
+| Concern | Implementation |
+|---|---|
+| detection | `detector.py` — `claude` on PATH, config dir, `projects/*.jsonl` |
+| one-shot | `claude -p --output-format json` |
+| streaming | `claude -p --output-format stream-json --verbose --include-partial-messages` |
+| continuity | `--resume <session_id>`; the returned `session_id` must be re-used |
+| options | `--permission-mode`, `--model`, `--allowed-tools`, `--disallowed-tools` |
+| cancellation | the running child process is killed by `_fabric_command_id` |
 
-- [agent/fabric_agent/providers/claude_code_local](/C:/Users/rvilain/PycharmProjects/Fabric/agent/fabric_agent/providers/claude_code_local)
+Progress events carry `message.delta` (text) and `message.tool_use` (a one-line
+summary of each tool call) so a terminal can show activity, not just the answer.
 
-The intended responsibilities are:
+See [claude-in-the-terminal.md](claude-in-the-terminal.md) and
+[claude-code-local-smoke-test.md](claude-code-local-smoke-test.md).
 
-- session detection
-- session attach
-- command execution
-- progress extraction
-- cancellation
-- manual action reporting
+## Not yet implemented
 
-## Current contracts
-
-The scaffold currently freezes three data contracts:
-
-- `ActionRequired`
-- `SessionStatus`
-- `ClaudeCodeLocalCapabilities`
-
-The first real `session.status` implementation is now based on conservative local signals:
-
-- presence of the `claude` executable
-- configured Claude Code config directory
-- persisted local transcript files under `projects/`
-- the `CLAUDE_CODE_SKIP_PROMPT_HISTORY` flag when history is disabled
-
-These contracts are defined in:
-
-- [agent/fabric_agent/providers/claude_code_local/models.py](/C:/Users/rvilain/PycharmProjects/Fabric/agent/fabric_agent/providers/claude_code_local/models.py)
-
-The provider stub is defined in:
-
-- [agent/fabric_agent/providers/claude_code_local/provider.py](/C:/Users/rvilain/PycharmProjects/Fabric/agent/fabric_agent/providers/claude_code_local/provider.py)
-
-The detection logic is defined in:
-
-- [agent/fabric_agent/providers/claude_code_local/detector.py](/C:/Users/rvilain/PycharmProjects/Fabric/agent/fabric_agent/providers/claude_code_local/detector.py)
-
-## Next implementation step
-
-The next meaningful coding step is to add a real session adapter behind `claude_code_local`, then register the provider only once:
-
-1. `session.status` returns real detection data
-2. `message.send` can attach to a local session
-3. `message.stream` emits real deltas
-4. `message.cancel` interrupts an in-flight turn
+`session.attach` and `message.cancel` are advertised in
+`ClaudeCodeLocalCapabilities` but have no dedicated action: cancellation goes
+through the generic `command.cancel` protocol message, and attaching is implicit
+via `--resume`. The capability list should be trimmed or the actions added.

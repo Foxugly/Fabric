@@ -91,7 +91,7 @@ async def test_frontend_events_socket_receives_agent_updates() -> None:
     connected, _ = await event_communicator.connect()
     assert connected is True
 
-    agent = await Agent.objects.acreate(name="events-agent")
+    agent = await Agent.objects.acreate(name="events-agent", owner=user)
     agent_token = await sync_to_async(agent.issue_development_token)()
     agent_communicator = WebsocketCommunicator(
         application,

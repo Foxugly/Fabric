@@ -27,7 +27,7 @@ Types implémentés dans cette première livraison :
 - `command.failed`
 - `error`
 
-Le protocole partagé est implémenté dans [shared/protocol/messages.py](/C:/Users/rvilain/PycharmProjects/Fabric/shared/protocol/messages.py).
+Le protocole partagé est implémenté dans [shared/protocol/messages.py](../shared/protocol/messages.py).
 
 Dans la première livraison, ce protocole transporte uniquement le provider de validation `echo`.
 

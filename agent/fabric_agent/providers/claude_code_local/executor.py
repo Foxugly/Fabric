@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
@@ -8,12 +11,18 @@ from fabric_agent.providers.claude_code_local.detector import (
     ClaudeCodeInstallationProbeLike,
 )
 from fabric_agent.providers.claude_code_local.runner import (
+    PERMISSION_MODES,
     ClaudeCodeCliError,
     ClaudeCodeCliRunner,
     ClaudeCodeExecutionRequest,
     ClaudeCodeExecutionResult,
-    StreamDeltaEvent,
+    StreamChunk,
 )
+
+COMMAND_ID_KEY = "_fabric_command_id"
+TIMEOUT_KEY = "_fabric_timeout_seconds"
+DEFAULT_TIMEOUT_SECONDS = 300
+MAX_TIMEOUT_SECONDS = 3600
 
 
 class ClaudeCodePayloadError(ValueError):
@@ -26,19 +35,47 @@ class ClaudeCodeMessageExecutor:
         installation_probe: ClaudeCodeInstallationProbeLike | None = None,
     ) -> None:
         self._installation_probe = installation_probe or ClaudeCodeInstallationProbe()
+        self._running: dict[str, asyncio.subprocess.Process] = {}
 
     async def execute(self, payload: dict[str, Any]) -> ClaudeCodeExecutionResult:
         request = self._build_request(payload)
         runner = self._runner()
-        return await runner.execute(request)
+        command_id = _command_id(payload)
+        try:
+            return await runner.execute(
+                request,
+                on_start=lambda process: self._track(command_id, process),
+            )
+        finally:
+            self._running.pop(command_id, None)
 
     async def stream(
         self,
         payload: dict[str, Any],
-    ) -> tuple[list[StreamDeltaEvent], ClaudeCodeExecutionResult]:
+    ) -> AsyncGenerator[StreamChunk, None]:
         request = self._build_request(payload)
         runner = self._runner()
-        return await runner.stream(request)
+        command_id = _command_id(payload)
+        try:
+            async for chunk in runner.stream(
+                request,
+                on_start=lambda process: self._track(command_id, process),
+            ):
+                yield chunk
+        finally:
+            self._running.pop(command_id, None)
+
+    async def cancel(self, payload: dict[str, Any]) -> None:
+        process = self._running.pop(_command_id(payload), None)
+        if process is None or process.returncode is not None:
+            return
+        with contextlib.suppress(ProcessLookupError):
+            process.kill()
+        with contextlib.suppress(ProcessLookupError):
+            await process.wait()
+
+    def _track(self, command_id: str, process: asyncio.subprocess.Process) -> None:
+        self._running[command_id] = process
 
     def _runner(self) -> ClaudeCodeCliRunner:
         installation = self._installation_probe.probe()
@@ -58,28 +95,17 @@ class ClaudeCodeMessageExecutor:
                 "claude_code_local.message.send requires a non-empty text payload"
             )
 
-        session_id = payload.get("session_id")
-        if session_id is not None and not isinstance(session_id, str):
-            raise ClaudeCodePayloadError("session_id must be a string when provided")
-
-        working_directory = payload.get("working_directory")
-        resolved_directory: Path | None = None
-        if working_directory is not None:
-            if not isinstance(working_directory, str) or not working_directory.strip():
-                raise ClaudeCodePayloadError(
-                    "working_directory must be a non-empty string when provided"
-                )
-            resolved_directory = Path(working_directory).expanduser()
-
-        timeout_seconds = payload.get("timeout_seconds", 300)
-        if not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
-            raise ClaudeCodePayloadError("timeout_seconds must be a positive integer")
-
         return ClaudeCodeExecutionRequest(
             prompt=prompt,
-            session_id=session_id,
-            working_directory=resolved_directory,
-            timeout_seconds=timeout_seconds,
+            session_id=_optional_string(payload.get("session_id"), "session_id"),
+            working_directory=_optional_directory(payload.get("working_directory")),
+            timeout_seconds=_timeout_seconds(payload),
+            permission_mode=_permission_mode(payload.get("permission_mode")),
+            model=_optional_string(payload.get("model"), "model"),
+            allowed_tools=_tool_list(payload.get("allowed_tools"), "allowed_tools"),
+            disallowed_tools=_tool_list(
+                payload.get("disallowed_tools"), "disallowed_tools"
+            ),
         )
 
 
@@ -91,9 +117,75 @@ def build_result_payload(result: ClaudeCodeExecutionResult) -> dict[str, Any]:
     }
 
 
+def _command_id(payload: dict[str, Any]) -> str:
+    command_id = payload.get(COMMAND_ID_KEY)
+    return command_id if isinstance(command_id, str) else "unknown"
+
+
+def _optional_string(value: Any, field_name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ClaudeCodePayloadError(
+            f"{field_name} must be a non-empty string when provided"
+        )
+    return value
+
+
+def _optional_directory(value: Any) -> Path | None:
+    working_directory = _optional_string(value, "working_directory")
+    if working_directory is None:
+        return None
+    resolved = Path(working_directory).expanduser()
+    if not resolved.is_dir():
+        raise ClaudeCodePayloadError(
+            "working_directory must point to an existing directory"
+        )
+    return resolved
+
+
+def _timeout_seconds(payload: dict[str, Any]) -> int:
+    timeout_seconds = payload.get(
+        "timeout_seconds",
+        payload.get(TIMEOUT_KEY, DEFAULT_TIMEOUT_SECONDS),
+    )
+    if (
+        not isinstance(timeout_seconds, int)
+        or isinstance(timeout_seconds, bool)
+        or not 0 < timeout_seconds <= MAX_TIMEOUT_SECONDS
+    ):
+        raise ClaudeCodePayloadError(
+            f"timeout_seconds must be an integer between 1 and {MAX_TIMEOUT_SECONDS}"
+        )
+    return timeout_seconds
+
+
+def _permission_mode(value: Any) -> str | None:
+    permission_mode = _optional_string(value, "permission_mode")
+    if permission_mode is None:
+        return None
+    if permission_mode not in PERMISSION_MODES:
+        raise ClaudeCodePayloadError(
+            "permission_mode must be one of " + ", ".join(sorted(PERMISSION_MODES))
+        )
+    return permission_mode
+
+
+def _tool_list(value: Any, field_name: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not all(
+        isinstance(entry, str) and entry.strip() for entry in value
+    ):
+        raise ClaudeCodePayloadError(
+            f"{field_name} must be a list of non-empty strings"
+        )
+    return tuple(value)
+
+
 def _sanitize_raw_payload(payload: dict[str, Any]) -> dict[str, Any]:
     sanitized: dict[str, Any] = {}
-    for key in ("session_id", "total_cost_usd", "duration_ms", "usage"):
+    for key in ("session_id", "total_cost_usd", "duration_ms", "usage", "num_turns"):
         value = payload.get(key)
         if value is not None:
             sanitized[key] = value

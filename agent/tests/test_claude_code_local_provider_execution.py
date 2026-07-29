@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncGenerator
+from typing import Any
 
 import pytest
 
@@ -14,6 +16,7 @@ from fabric_agent.providers.claude_code_local.models import SessionStatus
 from fabric_agent.providers.claude_code_local.provider import ClaudeCodeLocalProvider
 from fabric_agent.providers.claude_code_local.runner import (
     ClaudeCodeExecutionResult,
+    StreamChunk,
     StreamDeltaEvent,
 )
 
@@ -27,7 +30,7 @@ class StubStatusDetector(ClaudeCodeSessionStatusDetector):
 
 
 class FakeMessageExecutor(ClaudeCodeMessageExecutor):
-    async def execute(self, payload: dict[str, object]) -> ClaudeCodeExecutionResult:
+    async def execute(self, payload: dict[str, Any]) -> ClaudeCodeExecutionResult:
         return ClaudeCodeExecutionResult(
             text="Final response",
             session_id="session-123",
@@ -36,22 +39,18 @@ class FakeMessageExecutor(ClaudeCodeMessageExecutor):
 
     async def stream(
         self,
-        payload: dict[str, object],
-    ) -> tuple[list[StreamDeltaEvent], ClaudeCodeExecutionResult]:
-        return (
-            [
-                StreamDeltaEvent(sequence=1, delta="Final", snapshot="Final"),
-                StreamDeltaEvent(
-                    sequence=2,
-                    delta=" response",
-                    snapshot="Final response",
-                ),
-            ],
-            ClaudeCodeExecutionResult(
-                text="Final response",
-                session_id="session-123",
-                raw_payload={"result": "Final response", "session_id": "session-123"},
-            ),
+        payload: dict[str, Any],
+    ) -> AsyncGenerator[StreamChunk, None]:
+        yield StreamDeltaEvent(sequence=1, delta="Final", snapshot="Final")
+        yield StreamDeltaEvent(
+            sequence=2,
+            delta=" response",
+            snapshot="Final response",
+        )
+        yield ClaudeCodeExecutionResult(
+            text="Final response",
+            session_id="session-123",
+            raw_payload={"result": "Final response", "session_id": "session-123"},
         )
 
 
@@ -61,8 +60,9 @@ class BlockingMessageExecutor(ClaudeCodeMessageExecutor):
         self.started = asyncio.Event()
         self.release = asyncio.Event()
         self.calls: list[str] = []
+        self.cancelled: list[str] = []
 
-    async def execute(self, payload: dict[str, object]) -> ClaudeCodeExecutionResult:
+    async def execute(self, payload: dict[str, Any]) -> ClaudeCodeExecutionResult:
         text = str(payload["text"])
         self.calls.append(text)
         self.started.set()
@@ -72,6 +72,9 @@ class BlockingMessageExecutor(ClaudeCodeMessageExecutor):
             session_id="session-123",
             raw_payload={"result": text, "session_id": "session-123"},
         )
+
+    async def cancel(self, payload: dict[str, Any]) -> None:
+        self.cancelled.append(str(payload.get("_fabric_command_id", "")))
 
 
 @pytest.mark.asyncio
@@ -162,3 +165,58 @@ async def test_provider_serializes_concurrent_message_send_on_same_session() -> 
     assert first_result["text"] == "first"
     assert second_result["text"] == "second"
     assert executor.calls == ["first", "second"]
+
+
+@pytest.mark.asyncio
+async def test_provider_cancel_stops_the_running_cli() -> None:
+    executor = BlockingMessageExecutor()
+    provider = ClaudeCodeLocalProvider(
+        status_detector=StubStatusDetector(_ready_status()),
+        message_executor=executor,
+    )
+
+    await provider.cancel("message.send", {"_fabric_command_id": "cmd-1"})
+
+    assert executor.cancelled == ["cmd-1"]
+
+
+@pytest.mark.asyncio
+async def test_provider_advertises_fully_qualified_capabilities() -> None:
+    provider = ClaudeCodeLocalProvider(
+        status_detector=StubStatusDetector(_ready_status()),
+        message_executor=FakeMessageExecutor(),
+    )
+
+    capabilities = await provider.get_capabilities()
+
+    assert "claude_code_local.message.send" in capabilities
+    assert "claude_code_local.session.status" in capabilities
+
+
+@pytest.mark.asyncio
+async def test_provider_releases_session_lock_when_stream_abandoned() -> None:
+    provider = ClaudeCodeLocalProvider(
+        status_detector=StubStatusDetector(_ready_status()),
+        message_executor=FakeMessageExecutor(),
+    )
+    payload = {"text": "hello", "session_id": "shared"}
+
+    stream = provider.stream("message.send", payload)
+    assert await anext(stream) is not None
+    await stream.aclose()
+
+    # The abandoned stream must not keep the per-session lock forever.
+    result = await asyncio.wait_for(
+        provider.execute("message.send", payload), timeout=1
+    )
+
+    assert result["text"] == "Final response"
+
+
+def _ready_status() -> SessionStatus:
+    return SessionStatus(
+        session_detected=True,
+        session_ready=True,
+        manual_action_required=False,
+        transport="local_session",
+    )

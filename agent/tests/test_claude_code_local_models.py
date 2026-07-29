@@ -25,11 +25,8 @@ def test_claude_code_local_capabilities_serialize() -> None:
     assert capabilities.to_dict() == {
         "provider": "claude_code_local",
         "capabilities": [
-            "session.status",
-            "session.attach",
-            "message.send",
-            "message.stream",
-            "message.cancel",
+            "claude_code_local.session.status",
+            "claude_code_local.message.send",
         ],
     }
 

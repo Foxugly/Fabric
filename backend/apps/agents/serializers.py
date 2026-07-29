@@ -12,6 +12,7 @@ class AgentSerializer(serializers.ModelSerializer[Agent]):
         model = Agent
         fields = [
             "id",
+            "owner",
             "name",
             "description",
             "status",
@@ -25,6 +26,7 @@ class AgentSerializer(serializers.ModelSerializer[Agent]):
         ]
         read_only_fields = [
             "id",
+            "owner",
             "status",
             "version",
             "operating_system",
