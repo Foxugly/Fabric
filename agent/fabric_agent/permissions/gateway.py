@@ -114,8 +114,11 @@ class PermissionGateway:
         if self._server is None:
             return
         self._server.close()
+        # `Server.wait_closed()` waits for in-flight client handlers. One of
+        # those can still be draining a socket the broker never reads, so a
+        # bounded wait keeps shutdown from hanging forever.
         with contextlib.suppress(Exception):
-            await self._server.wait_closed()
+            await asyncio.wait_for(self._server.wait_closed(), timeout=5)
         self._server = None
         self._port = None
 
@@ -139,20 +142,7 @@ class PermissionGateway:
         writer: asyncio.StreamWriter,
     ) -> None:
         try:
-            raw_line = await asyncio.wait_for(reader.readline(), timeout=30)
-            if not raw_line:
-                return
-            message = json.loads(raw_line.decode("utf-8"))
-            if not isinstance(message, dict):
-                raise ValueError("Permission request must be a JSON object")
-            if not secrets.compare_digest(str(message.get("token", "")), self._token):
-                LOGGER.warning("Rejected permission request with a bad token")
-                return
-
-            decision = await self._decide(_parse_request(message))
-            response = decision.to_mcp_response(
-                _coerce_input(message.get("input")),
-            )
+            response = await self._respond(reader)
         except Exception as exc:
             LOGGER.warning("Permission request failed: %s", exc)
             response = {
@@ -160,12 +150,33 @@ class PermissionGateway:
                 "message": f"Fabric could not obtain a decision: {exc}",
             }
 
-        with contextlib.suppress(Exception):
-            writer.write((json.dumps(response) + "\n").encode("utf-8"))
-            await writer.drain()
-        with contextlib.suppress(Exception):
-            writer.close()
-            await writer.wait_closed()
+        try:
+            if response is not None:
+                writer.write((json.dumps(response) + "\n").encode("utf-8"))
+                with contextlib.suppress(Exception):
+                    await writer.drain()
+        finally:
+            # Always hang up, including on a rejected token: a caller left
+            # waiting on an open socket would block its Claude Code turn
+            # forever.
+            with contextlib.suppress(Exception):
+                writer.close()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(writer.wait_closed(), timeout=5)
+
+    async def _respond(self, reader: asyncio.StreamReader) -> dict[str, Any] | None:
+        raw_line = await asyncio.wait_for(reader.readline(), timeout=30)
+        if not raw_line:
+            return None
+        message = json.loads(raw_line.decode("utf-8"))
+        if not isinstance(message, dict):
+            raise ValueError("Permission request must be a JSON object")
+        if not secrets.compare_digest(str(message.get("token", "")), self._token):
+            LOGGER.warning("Rejected permission request with a bad token")
+            return None
+
+        decision = await self._decide(_parse_request(message))
+        return decision.to_mcp_response(_coerce_input(message.get("input")))
 
     async def _decide(self, request: PermissionRequest) -> PermissionDecision:
         if self._handler is None:

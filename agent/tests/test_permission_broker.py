@@ -121,7 +121,7 @@ async def test_broker_and_gateway_agree_end_to_end(
     thread.start()
 
     try:
-        for _ in range(100):
+        for _ in range(200):
             if published:
                 break
             await asyncio.sleep(0.02)
@@ -130,7 +130,8 @@ async def test_broker_and_gateway_agree_end_to_end(
         assert published[0].tool_name == "Edit"
 
         gateway.resolve(published[0].request_id, PermissionDecision(allowed=True))
-        await asyncio.get_running_loop().run_in_executor(None, thread.join, 5)
+        await asyncio.to_thread(thread.join, 10)
+        assert not thread.is_alive()
     finally:
         await gateway.stop()
 

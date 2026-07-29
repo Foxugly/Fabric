@@ -16,6 +16,7 @@ dev = [
   "mypy>=1.11",
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
+  "pytest-timeout>=2.3",
   "ruff>=0.6",
 ]
 
@@ -36,6 +37,10 @@ packages = [
 [tool.pytest.ini_options]
 python_files = ["tests.py", "test_*.py", "*_tests.py"]
 asyncio_mode = "auto"
+# The suite drives real sockets and subprocesses: a deadlock must fail loudly
+# with a traceback instead of stalling CI.
+timeout = 60
+timeout_method = "thread"
 
 [tool.ruff]
 line-length = 88
