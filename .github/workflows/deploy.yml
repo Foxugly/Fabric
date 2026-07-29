@@ -18,6 +18,25 @@ env:
   BUNDLE_PREFIX: builds/fabric-frontend
 
 jobs:
+  # `secrets` is not available in a job-level `if`, only in step `env` — hence
+  # this tiny gate rather than a condition on the deploy job itself.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - id: check
+        env:
+          ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          if [ -n "$ROLE_ARN" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "AWS_DEPLOY_ROLE_ARN is unset - see deploy/ONBOARDING.md." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -43,10 +62,10 @@ jobs:
           pytest -q
 
   deploy:
-    needs: test
-    # Stays skipped until the OIDC role exists, so merging this before the AWS
-    # side is provisioned does not produce a red build (deploy/ONBOARDING.md).
-    if: ${{ secrets.AWS_DEPLOY_ROLE_ARN != '' }}
+    needs: [gate, test]
+    # Stays skipped until the OIDC role exists, so merging before the AWS side is
+    # provisioned does not produce a red build (deploy/ONBOARDING.md).
+    if: needs.gate.outputs.configured == 'true'
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -68,9 +87,7 @@ jobs:
           npx ng build --configuration production
 
       - name: Pack the SPA
-        run: |
-          tar -czf fabric-frontend.tar.gz \
-            -C frontend/dist/fabric-frontend/browser .
+        run: tar -czf fabric-frontend.tar.gz -C frontend/dist/fabric-frontend/browser .
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -82,80 +99,26 @@ jobs:
           aws s3 cp fabric-frontend.tar.gz \
             "s3://${DEPLOY_BUCKET}/${BUNDLE_PREFIX}/${GITHUB_SHA}.tar.gz"
 
-      - name: Deploy on the box via SSM
+      - name: Send the deploy command
         id: ssm
         env:
           INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
         run: |
           set -euo pipefail
-          # NOTE: the commands below run as ROOT under /bin/sh (dash) with no
-          # $HOME — hence `set -eu` (no pipefail), an explicit HOME, and
-          # git safe.directory. See OPERATIONS.md §3.11.
+          BUNDLE="s3://${DEPLOY_BUCKET}/${BUNDLE_PREFIX}/${GITHUB_SHA}.tar.gz"
+          # The remote script lives in deploy/ssm-remote.sh so it stays
+          # reviewable and free of YAML/heredoc quoting traps. jq --rawfile does
+          # the JSON escaping.
+          sed -e "s|__SHA__|${GITHUB_SHA}|g" -e "s|__BUNDLE__|${BUNDLE}|g" \
+            deploy/ssm-remote.sh > /tmp/fabric-remote.sh
+          jq -n --rawfile script /tmp/fabric-remote.sh \
+            '{commands: [$script]}' > /tmp/fabric-params.json
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name AWS-RunShellScript \
-            --comment "Deploy Fabric ${GITHUB_SHA}" \
+            --comment "Deploy Fabric ${GITHUB_SHA:0:7}" \
             --timeout-seconds 600 \
-            --parameters commands="$(cat <<EOF
-set -eu
-export HOME=/root
-APP_DIR=/var/www/django_websites/Fabric
-BRANCH=main
-BUNDLE=s3://${DEPLOY_BUCKET}/${BUNDLE_PREFIX}/${GITHUB_SHA}.tar.gz
-SPA_DIR=\$APP_DIR/frontend/dist/fabric-frontend/browser
-
-git config --global --get-all safe.directory | grep -qx "\$APP_DIR" \
-  || git config --global --add safe.directory "\$APP_DIR"
-
-echo "== sync code =="
-cd "\$APP_DIR"
-sudo -u django git fetch --prune origin "\$BRANCH"
-sudo -u django git reset --hard "origin/\$BRANCH"
-
-echo "== install root-loaded config from the git blob =="
-git show "origin/\$BRANCH:deploy/fetch-env-from-ssm.sh" > /usr/local/sbin/fabric-env-fetch.sh
-chown root:root /usr/local/sbin/fabric-env-fetch.sh
-chmod 0755 /usr/local/sbin/fabric-env-fetch.sh
-git show "origin/\$BRANCH:deploy/systemd/fabric-env-fetch.service" > /etc/systemd/system/fabric-env-fetch.service
-git show "origin/\$BRANCH:deploy/systemd/fabric-asgi.service" > /etc/systemd/system/fabric-asgi.service
-systemctl daemon-reload
-
-echo "== install nginx vhost (with rollback guard) =="
-VHOST=/etc/nginx/sites-available/fabric.foxugly.com
-if [ -f "\$VHOST" ]; then cp -a "\$VHOST" "\$VHOST.deploybak"; fi
-git show "origin/\$BRANCH:deploy/nginx/fabric.foxugly.com.conf" > "\$VHOST"
-ln -sfn "\$VHOST" /etc/nginx/sites-enabled/fabric.foxugly.com
-if nginx -t; then
-  systemctl reload nginx
-else
-  echo "nginx -t failed, rolling the vhost back" >&2
-  if [ -f "\$VHOST.deploybak" ]; then mv -f "\$VHOST.deploybak" "\$VHOST"; else rm -f "\$VHOST" /etc/nginx/sites-enabled/fabric.foxugly.com; fi
-  nginx -t && systemctl reload nginx
-  exit 1
-fi
-
-echo "== unpack the SPA =="
-TMP=\$(mktemp -d)
-aws s3 cp "\$BUNDLE" "\$TMP/spa.tar.gz" --region ${AWS_REGION}
-sudo -u django mkdir -p "\$SPA_DIR"
-tar -xzf "\$TMP/spa.tar.gz" -C "\$SPA_DIR" --no-same-owner
-rm -rf "\$TMP"
-
-echo "== backend deploy (as django) =="
-sudo -u django bash "\$APP_DIR/deploy/ssm-deploy.sh"
-
-echo "== restart =="
-systemctl restart fabric-asgi
-
-echo "== normalize perms (chown BEFORE chmod, §3.1) =="
-chown -R django:www-data "\$APP_DIR"
-chmod -R g-w,o-rwx "\$APP_DIR"
-
-echo "== health =="
-sleep 5
-curl -fsS -o /dev/null -w '%{http_code}\n' https://fabric.foxugly.com/health/
-EOF
-)" \
+            --parameters "file:///tmp/fabric-params.json" \
             --query 'Command.CommandId' --output text)
           echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
           echo "SSM command $COMMAND_ID"
@@ -166,16 +129,18 @@ EOF
           COMMAND_ID: ${{ steps.ssm.outputs.command_id }}
         run: |
           set -euo pipefail
-          for _ in $(seq 1 60); do
+          STATUS=Pending
+          for _ in $(seq 1 90); do
             STATUS=$(aws ssm get-command-invocation \
               --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
               --query Status --output text)
             case "$STATUS" in
-              Success) echo "deploy succeeded"; break ;;
-              Failed|Cancelled|TimedOut) echo "deploy $STATUS"; FAILED=1; break ;;
+              Success|Failed|Cancelled|TimedOut) break ;;
               *) sleep 10 ;;
             esac
           done
+
+          echo "--- stdout ---"
           aws ssm get-command-invocation \
             --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
             --query StandardOutputContent --output text
@@ -183,8 +148,9 @@ EOF
             --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
             --query StandardErrorContent --output text)
           if [ -n "$ERRORS" ] && [ "$ERRORS" != "None" ]; then
-            echo "--- stderr ---"; echo "$ERRORS"
+            echo "--- stderr ---"
+            echo "$ERRORS"
           fi
-          if [ "${FAILED:-0}" = "1" ] || [ "${STATUS}" != "Success" ]; then
-            exit 1
-          fi
+
+          echo "final status: $STATUS"
+          [ "$STATUS" = "Success" ]
