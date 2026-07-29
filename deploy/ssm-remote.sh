@@ -9,6 +9,15 @@
 set -eu
 
 export HOME=/root
+
+# Force the EC2 instance role over root's static certbot-route53 keys in
+# /root/.aws, which would otherwise shadow it — that IAM user has no S3 or SSM
+# access, so `aws s3 cp` fails with a bare 403 (OPERATIONS.md §3.5). Every aws
+# call in an SSM-run script needs this, exactly like the env-fetch unit does.
+export AWS_SHARED_CREDENTIALS_FILE=/dev/null
+export AWS_CONFIG_FILE=/dev/null
+export AWS_REGION=eu-west-1
+
 APP_DIR=/var/www/django_websites/Fabric
 BRANCH=main
 BUNDLE=__BUNDLE__
@@ -56,7 +65,7 @@ fi
 
 echo "== unpack the SPA =="
 TMP=$(mktemp -d)
-aws s3 cp "$BUNDLE" "$TMP/spa.tar.gz" --region eu-west-1
+aws s3 cp "$BUNDLE" "$TMP/spa.tar.gz"
 sudo -u django mkdir -p "$SPA_DIR"
 tar -xzf "$TMP/spa.tar.gz" -C "$SPA_DIR" --no-same-owner
 rm -rf "$TMP"
