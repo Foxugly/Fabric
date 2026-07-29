@@ -195,6 +195,6 @@ machine, and secure it accordingly:
 - run the agent as an unprivileged Windows account, never as an administrator;
 - the agent's development token is a bearer credential; rotate it with
   `POST /api/v1/agents/<id>/development-token` and revoke with `.../revoke`;
-- serve Fabric over HTTPS. Outside `DJANGO_DEBUG=true` the backend refuses to
-  start without `DJANGO_SECRET_KEY` and enables HSTS, secure cookies and an
-  HTTPS redirect.
+- serve Fabric over HTTPS. With `DEBUG` off the backend refuses to start without
+  `SECRET_KEY` and `REDIS_URL`, and enables HSTS, secure cookies and an HTTPS
+  redirect.

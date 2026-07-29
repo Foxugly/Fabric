@@ -84,6 +84,8 @@ async def test_message_create_dispatches_command_and_updates_assistant_message(
     event_communicator = WebsocketCommunicator(
         application,
         f"/ws/v1/events/?token={user_token.key}",
+        # The browser event socket is origin-checked (config/routing.py).
+        headers=[(b"origin", b"http://127.0.0.1:4200")],
     )
     event_connected, _ = await event_communicator.connect()
     assert event_connected is True

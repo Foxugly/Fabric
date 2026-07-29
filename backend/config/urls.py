@@ -6,6 +6,7 @@ from apps.agents.views import AgentViewSet
 from apps.api_auth.views import LoginView, LogoutView, MeView
 from apps.commands.views import CommandViewSet
 from apps.conversations.views import ConversationViewSet, MessageViewSet
+from config.health import health
 
 router = DefaultRouter()
 router.register("agents", AgentViewSet, basename="agent")
@@ -13,6 +14,7 @@ router.register("commands", CommandViewSet, basename="command")
 router.register("conversations", ConversationViewSet, basename="conversation")
 
 urlpatterns = [
+    path("health/", health, name="health"),
     path("admin/", admin.site.urls),
     path("api/v1/auth/login/", LoginView.as_view(), name="auth-login"),
     path("api/v1/auth/logout/", LogoutView.as_view(), name="auth-logout"),

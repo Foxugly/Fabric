@@ -23,7 +23,15 @@
           },
           "configurations": {
             "production": {
-              "optimization": true,
+              "optimization": {
+                "scripts": true,
+                "fonts": true,
+                "styles": {
+                  "minify": true,
+                  "removeSpecialComments": true,
+                  "inlineCritical": false
+                }
+              },
               "outputHashing": "all"
             },
             "development": {

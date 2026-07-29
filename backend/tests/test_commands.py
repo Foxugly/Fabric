@@ -454,7 +454,10 @@ async def test_frontend_events_socket_receives_command_updates_and_progress() ->
 
     token = await sync_to_async(agent.issue_development_token)()
     event_communicator = WebsocketCommunicator(
-        application, f"/ws/v1/events/?token={user_token.key}"
+        application,
+        f"/ws/v1/events/?token={user_token.key}",
+        # The browser event socket is origin-checked (config/routing.py).
+        headers=[(b"origin", b"http://127.0.0.1:4200")],
     )
     event_connected, _ = await event_communicator.connect()
     assert event_connected is True
