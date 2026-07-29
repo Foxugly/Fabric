@@ -21,9 +21,13 @@ from fabric_agent.providers.claude_code_local.runner import (
     _parse_json_payload,
 )
 
+#: The agent targets Windows, but the test suite also runs on Linux CI where
+#: `str(Path(...))` keeps forward slashes. Compare against the resolved form.
+CLAUDE_PATH = Path("C:/Tools/claude.exe")
+
 
 def test_build_json_command_with_resume() -> None:
-    runner = ClaudeCodeCliRunner(Path("C:/Tools/claude.exe"))
+    runner = ClaudeCodeCliRunner(CLAUDE_PATH)
 
     args = runner._build_json_command(
         ClaudeCodeExecutionRequest(
@@ -33,7 +37,7 @@ def test_build_json_command_with_resume() -> None:
     )
 
     assert args == [
-        "C:\\Tools\\claude.exe",
+        str(CLAUDE_PATH),
         "-p",
         "--output-format",
         "json",
@@ -44,14 +48,14 @@ def test_build_json_command_with_resume() -> None:
 
 
 def test_build_stream_command_without_resume() -> None:
-    runner = ClaudeCodeCliRunner(Path("C:/Tools/claude.exe"))
+    runner = ClaudeCodeCliRunner(CLAUDE_PATH)
 
     args = runner._build_stream_command(
         ClaudeCodeExecutionRequest(prompt="Explain recursion")
     )
 
     assert args == [
-        "C:\\Tools\\claude.exe",
+        str(CLAUDE_PATH),
         "-p",
         "--output-format",
         "stream-json",
@@ -67,7 +71,7 @@ def test_parse_json_payload_rejects_invalid_json() -> None:
 
 
 def test_build_stream_command_forwards_claude_cli_options() -> None:
-    runner = ClaudeCodeCliRunner(Path("C:/Tools/claude.exe"))
+    runner = ClaudeCodeCliRunner(CLAUDE_PATH)
 
     args = runner._build_stream_command(
         ClaudeCodeExecutionRequest(
