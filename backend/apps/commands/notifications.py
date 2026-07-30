@@ -22,6 +22,7 @@ import logging
 import threading
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from typing import Any
 
 from django.conf import settings
@@ -34,6 +35,52 @@ SEND_PATH = "/api/v1/notifications/app/send/"
 MESSAGE_MAX_CHARS = 300
 
 
+@dataclass(frozen=True, slots=True)
+class Destination:
+    """Where a notification goes: a token, a host, and a title."""
+
+    app_token: str
+    base_url: str
+    title_prefix: str
+    policy: dict[str, bool]
+
+    def wants(self, event: str) -> bool:
+        return bool(self.policy.get(event, False))
+
+
+def _destination_for(user: Any) -> Destination | None:
+    """The user's own PushIT target, falling back to the site settings.
+
+    Per-user first: with owners in the picture, "who to notify" is user data.
+    The site-level PUSHIT_* settings remain a fallback so a deployment without
+    any profile configured still behaves.
+    """
+    if user is not None:
+        from apps.api_auth.models import PushItTarget
+
+        target = (
+            PushItTarget.objects.filter(owner=user, enabled=True)
+            .order_by("-is_default", "name")
+            .first()
+        )
+        if target is not None and target.app_token:
+            return Destination(
+                app_token=target.app_token,
+                base_url=target.base_url.rstrip("/"),
+                title_prefix=target.title or "Fabric",
+                policy=target.event_policy(),
+            )
+
+    if getattr(settings, "PUSHIT_ACTIVE", False):
+        return Destination(
+            app_token=settings.PUSHIT_APP_TOKEN,
+            base_url=settings.PUSHIT_BASE_URL.rstrip("/"),
+            title_prefix="Fabric",
+            policy=dict(settings.PUSHIT_EVENTS),
+        )
+    return None
+
+
 def notify_permission_request(
     command: Command,
     request: PermissionRequest,
@@ -41,9 +88,10 @@ def notify_permission_request(
     """Claude is blocked until a human rules on this tool call."""
     hint = _tool_hint(request.tool_input)
     _send(
+        destination=_destination_for(command.requested_by),
         event="permission_request",
         idempotency_key=f"fabric:perm:{request.request_id}",
-        title="Fabric — autorisation demandée",
+        title="autorisation demandée",
         message=(
             f"Claude veut utiliser {request.tool_name}{hint}. "
             "Répondez allow ou deny dans le terminal."
@@ -61,13 +109,14 @@ def notify_command_finished(command: Command) -> None:
         return
 
     if command.status == CommandStatus.SUCCEEDED:
-        event, title = "claude_turn_completed", "Fabric — tour terminé"
+        event, title = "claude_turn_completed", "tour terminé"
         body = _result_excerpt(command) or "Terminé sans texte."
     else:
-        event, title = "claude_turn_failed", f"Fabric — tour {command.status}"
+        event, title = "claude_turn_failed", f"tour {command.status}"
         body = command.error or "Sans détail."
 
     _send(
+        destination=_destination_for(command.requested_by),
         event=event,
         idempotency_key=f"fabric:cmd:{command.id}:{command.status}",
         title=title,
@@ -75,46 +124,60 @@ def notify_command_finished(command: Command) -> None:
     )
 
 
-def notify_agent_offline(agent_name: str, in_flight: int) -> None:
+def notify_agent_offline(agent: Any, in_flight: int) -> None:
     _send(
+        destination=_destination_for(getattr(agent, "owner", None)),
         event="agent_offline",
-        idempotency_key=f"fabric:offline:{agent_name}:{in_flight}",
-        title="Fabric — agent déconnecté",
+        idempotency_key=f"fabric:offline:{agent.name}:{in_flight}",
+        title="agent déconnecté",
         message=(
-            f"L'agent {agent_name} s'est déconnecté "
+            f"L'agent {agent.name} s'est déconnecté "
             f"avec {in_flight} commande(s) en cours."
         ),
     )
 
 
-def _send(*, event: str, idempotency_key: str, title: str, message: str) -> None:
-    if not getattr(settings, "PUSHIT_ACTIVE", False):
-        return
-    if not settings.PUSHIT_EVENTS.get(event, False):
+def _send(
+    *,
+    destination: Destination | None,
+    event: str,
+    idempotency_key: str,
+    title: str,
+    message: str,
+) -> None:
+    if destination is None or not destination.wants(event):
         return
 
     payload = json.dumps(
-        {"title": title[:255], "message": _truncate(message)}
+        {
+            "title": f"{destination.title_prefix} — {title}"[:255],
+            "message": _truncate(message),
+        }
     ).encode("utf-8")
 
     thread = threading.Thread(
         target=_post,
-        args=(payload, idempotency_key, event),
+        args=(destination, payload, idempotency_key, event),
         name=f"pushit-{event}",
         daemon=True,
     )
     thread.start()
 
 
-def _post(payload: bytes, idempotency_key: str, event: str) -> None:
-    url = f"{settings.PUSHIT_BASE_URL}{SEND_PATH}"
+def _post(
+    destination: Destination,
+    payload: bytes,
+    idempotency_key: str,
+    event: str,
+) -> None:
+    url = f"{destination.base_url}{SEND_PATH}"
     request = urllib.request.Request(
         url,
         data=payload,
         method="POST",
         headers={
             "Content-Type": "application/json",
-            "X-App-Token": settings.PUSHIT_APP_TOKEN,
+            "X-App-Token": destination.app_token,
             # Required by the endpoint; replaying a key returns the existing
             # notification instead of sending twice.
             "Idempotency-Key": idempotency_key,
@@ -122,7 +185,7 @@ def _post(payload: bytes, idempotency_key: str, event: str) -> None:
     )
     try:
         with urllib.request.urlopen(
-            request, timeout=settings.PUSHIT_TIMEOUT_SECONDS
+            request, timeout=getattr(settings, "PUSHIT_TIMEOUT_SECONDS", 5)
         ) as response:
             LOGGER.info("PushIT %s -> HTTP %s", event, response.status)
     except urllib.error.HTTPError as exc:

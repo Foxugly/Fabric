@@ -3,7 +3,12 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from apps.agents.views import AgentViewSet
-from apps.api_auth.views import LoginView, LogoutView, MeView
+from apps.api_auth.views import (
+    LoginView,
+    LogoutView,
+    MeView,
+    PushItTargetViewSet,
+)
 from apps.commands.views import CommandViewSet
 from apps.conversations.views import ConversationViewSet, MessageViewSet
 from config.health import health
@@ -12,6 +17,9 @@ router = DefaultRouter()
 router.register("agents", AgentViewSet, basename="agent")
 router.register("commands", CommandViewSet, basename="command")
 router.register("conversations", ConversationViewSet, basename="conversation")
+router.register(
+    "notification-targets", PushItTargetViewSet, basename="notification-target"
+)
 
 urlpatterns = [
     path("health/", health, name="health"),

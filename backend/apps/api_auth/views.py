@@ -2,13 +2,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from rest_framework import permissions, response, status, throttling
+from rest_framework import permissions, response, status, throttling, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.request import Request
 from rest_framework.views import APIView
 
 from apps.api_auth.authentication import is_token_expired
-from apps.api_auth.serializers import LoginSerializer, UserSerializer
+from apps.api_auth.models import PushItTarget
+from apps.api_auth.serializers import (
+    LoginSerializer,
+    PushItTargetSerializer,
+    UserSerializer,
+)
 
 
 class LoginView(APIView):
@@ -58,3 +63,21 @@ def issue_token(user: Any) -> Token:
 
     token.delete()
     return Token.objects.create(user=user)
+
+
+class PushItTargetViewSet(viewsets.ModelViewSet[PushItTarget]):
+    """CRUD on the caller's own notification targets.
+
+    Every query is scoped to `request.user`: a target is never shared, and an
+    app token belongs to whoever created it.
+    """
+
+    serializer_class = PushItTargetSerializer
+
+    def get_queryset(self) -> Any:
+        # DRF guarantees an authenticated user here; the id keeps mypy honest about
+        # the AnonymousUser branch it cannot rule out.
+        return PushItTarget.objects.filter(owner_id=self.request.user.id)
+
+    def perform_create(self, serializer: Any) -> None:
+        serializer.save(owner=self.request.user)

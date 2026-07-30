@@ -199,7 +199,7 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
             sync_message_for_command_failed(command)
             publish_command_updated(command)
         if in_flight:
-            notify_agent_offline(agent.name, len(in_flight))
+            notify_agent_offline(agent, len(in_flight))
 
     def _touch_agent(self) -> None:
         if self.agent is None:

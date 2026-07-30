@@ -91,9 +91,10 @@ def test_permission_request_carries_the_decidable_detail(
         request = _permission(command)
         notifications.notify_permission_request(command, request)
 
-    payload, key, event = post.call_args[0]
+    _destination, payload, key, event = post.call_args[0]
     body = json.loads(payload.decode("utf-8"))
     assert event == "permission_request"
+    assert body["title"].startswith("Fabric — ")
     assert key == f"fabric:perm:{request.request_id}"
     assert "Bash" in body["message"]
     assert "git push --force" in body["message"]
@@ -123,7 +124,7 @@ def test_a_finished_claude_turn_notifies_with_an_excerpt(
     with patch.object(notifications, "_post") as post:
         notifications.notify_command_finished(command)
 
-    payload, key, event = post.call_args[0]
+    _destination, payload, key, event = post.call_args[0]
     body = json.loads(payload.decode("utf-8"))
     assert event == "claude_turn_completed"
     assert key.endswith(f":{CommandStatus.SUCCEEDED}")
@@ -139,7 +140,7 @@ def test_a_failed_turn_reports_the_error(command: Command, active: None) -> None
     with patch.object(notifications, "_post") as post:
         notifications.notify_command_finished(command)
 
-    payload, _, event = post.call_args[0]
+    _destination, payload, _, event = post.call_args[0]
     assert event == "claude_turn_failed"
     assert "timed out" in json.loads(payload.decode("utf-8"))["message"]
 
@@ -153,7 +154,7 @@ def test_long_messages_are_truncated(command: Command, active: None) -> None:
     with patch.object(notifications, "_post") as post:
         notifications.notify_command_finished(command)
 
-    body = json.loads(post.call_args[0][0].decode("utf-8"))
+    body = json.loads(post.call_args[0][1].decode("utf-8"))
     assert len(body["message"]) <= notifications.MESSAGE_MAX_CHARS
     assert body["message"].endswith("…")
 
