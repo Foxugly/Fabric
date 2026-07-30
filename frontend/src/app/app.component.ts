@@ -118,6 +118,37 @@ interface PendingPermission {
           </div>
         </header>
 
+        <!--
+          A pending approval blocks a turn on the machine, so it gets a card of
+          its own rather than a line in the scrollback: on a phone, typing
+          "allow" against autocorrect is hostile, and this is the gesture the
+          operator makes most often.
+        -->
+        <section class="permission" *ngIf="pendingPermission() as pending">
+          <div class="permission__what">
+            <span class="permission__tool">{{ pending.toolName }}</span>
+            <span class="permission__hint" *ngIf="permissionHint() as hint">{{ hint }}</span>
+          </div>
+          <div class="permission__actions">
+            <button
+              type="button"
+              class="permission__allow"
+              [disabled]="decidingPermission()"
+              (click)="decidePermission(true)"
+            >
+              Autoriser
+            </button>
+            <button
+              type="button"
+              class="permission__deny"
+              [disabled]="decidingPermission()"
+              (click)="decidePermission(false)"
+            >
+              Refuser
+            </button>
+          </div>
+        </section>
+
         <main class="terminal-shell">
           <p-terminal
             *ngIf="terminalMounted()"
@@ -327,6 +358,61 @@ interface PendingPermission {
       user-select: text;
     }
 
+    .permission {
+      margin: 0 18px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      background: #2b2410;
+      border: 1px solid #b78a2b;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .permission__what {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .permission__tool {
+      font-weight: 600;
+      color: #ffd98a;
+    }
+
+    .permission__hint {
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 12px;
+      color: #d8c9a4;
+      overflow-wrap: anywhere;
+    }
+
+    .permission__actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    /* Comfortable touch targets: this is answered from a phone. */
+    .permission__allow,
+    .permission__deny {
+      min-height: 44px;
+      min-width: 116px;
+      font-weight: 600;
+    }
+
+    .permission__allow {
+      background: #15803d;
+      border-color: #1a9c4b;
+    }
+
+    .permission__deny {
+      background: #b91c1c;
+      border-color: #d33;
+    }
+
     .runtime-error {
       position: fixed;
       right: 16px;
@@ -427,6 +513,7 @@ export class AppComponent implements OnDestroy {
   readonly claudeSessionId = signal<string | null>(null);
   readonly claudePermissionMode = signal(DEFAULT_CLAUDE_PERMISSION_MODE);
   readonly pendingPermission = signal<PendingPermission | null>(null);
+  readonly decidingPermission = signal(false);
 
   private activeCommandSawProgress = false;
   private activeCommandLastSequence = 0;
@@ -735,30 +822,59 @@ export class AppComponent implements OnDestroy {
     return '';
   }
 
-  private async handlePermissionTerminalCommand(command: string): Promise<boolean> {
+  /** The tool argument that makes the request decidable, for the card. */
+  permissionHint(): string {
     const pending = this.pendingPermission();
     if (pending === null) {
+      return '';
+    }
+    return this.summarizeToolInput(pending.toolInput).replace(/^ — /, '');
+  }
+
+  /** Button path. The typed `allow` / `deny` path routes here too. */
+  decidePermission(allowed: boolean, reason = ''): void {
+    void this.submitPermissionDecision(allowed, reason);
+  }
+
+  private async handlePermissionTerminalCommand(command: string): Promise<boolean> {
+    if (this.pendingPermission() === null) {
       return false;
     }
 
     const match = /^(allow|deny|y|n)(?:\s+([\s\S]*))?$/i.exec(command.trim());
     if (match === null) {
       this.terminalService.sendResponse(
-        'Claude is waiting for a decision. Answer with `allow` or `deny [reason]`.',
+        'Claude attend une décision. Répondez `allow` ou `deny [raison]`, ' +
+          'ou utilisez les boutons.',
       );
       return true;
     }
 
     const verb = match[1].toLowerCase();
-    const allowed = verb === 'allow' || verb === 'y';
-    const reason = (match[2] ?? '').trim();
+    await this.submitPermissionDecision(
+      verb === 'allow' || verb === 'y',
+      (match[2] ?? '').trim(),
+    );
+    return true;
+  }
+
+  private async submitPermissionDecision(
+    allowed: boolean,
+    reason: string,
+  ): Promise<void> {
+    const pending = this.pendingPermission();
     const commandId = this.activeCommandId();
+    if (pending === null || this.decidingPermission()) {
+      return;
+    }
     if (commandId === null) {
       this.pendingPermission.set(null);
-      return true;
+      return;
     }
 
-    this.pendingPermission.set(null);
+    // Clear only after the call succeeds: losing the card on a failed request
+    // would leave the turn blocked with no way to answer.
+    this.decidingPermission.set(true);
     try {
       await firstValueFrom(
         this.commandService.decidePermission(
@@ -768,13 +884,17 @@ export class AppComponent implements OnDestroy {
           reason,
         ),
       );
-      this.appendTerminalLine(allowed ? '[allowed]' : `[denied]${reason ? ` ${reason}` : ''}`);
+      this.pendingPermission.set(null);
+      this.appendTerminalLine(
+        allowed ? '[autorisé]' : `[refusé]${reason ? ` ${reason}` : ''}`,
+      );
     } catch (error) {
-      const message = this.extractHttpError(error, 'Could not send the decision');
+      const message = this.extractHttpError(error, "Décision non transmise");
       this.terminalError.set(message);
       this.appendTerminalLine(message);
+    } finally {
+      this.decidingPermission.set(false);
     }
-    return true;
   }
 
   private async handleTerminalCommand(command: string): Promise<void> {
@@ -1310,6 +1430,7 @@ export class AppComponent implements OnDestroy {
 
   private resetStreamingState(): void {
     this.pendingPermission.set(null);
+    this.decidingPermission.set(false);
     this.activeCommandSawProgress = false;
     this.activeCommandLastSequence = 0;
     this.stdoutBuffer = '';

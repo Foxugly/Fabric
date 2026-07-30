@@ -234,6 +234,57 @@ FABRIC_COMMAND_GRACE_SECONDS = int(_env("FABRIC_COMMAND_GRACE_SECONDS", "30"))
 #: an agent that can run code, so it must not live forever.
 FABRIC_TOKEN_TTL_HOURS = int(_env("FABRIC_TOKEN_TTL_HOURS", "168"))
 
+# PushIT notifications — Fabric is meant to be driven while away from the
+# screen, and a turn blocked on an approval is invisible until you look. PushIT
+# (the fleet's own push service) closes that gap.
+#
+# `PUSHIT_EVENTS` is a JSON object so the policy can change without a deploy.
+# Defaults are scoped to Claude on purpose: a PowerShell `git status` finishing
+# does not deserve a phone buzz, an approval request does.
+PUSHIT_ENABLED = _env_bool("PUSHIT_ENABLED", False)
+PUSHIT_BASE_URL = _env("PUSHIT_BASE_URL", "https://pushit-api.foxugly.com").rstrip("/")
+PUSHIT_APP_TOKEN = _env("PUSHIT_APP_TOKEN")
+PUSHIT_TIMEOUT_SECONDS = int(_env("PUSHIT_TIMEOUT_SECONDS", "5"))
+
+PUSHIT_DEFAULT_EVENTS = {
+    "permission_request": True,
+    "claude_turn_completed": True,
+    "claude_turn_failed": True,
+    "agent_offline": False,
+}
+
+
+def _pushit_events() -> dict[str, bool]:
+    raw = _env("PUSHIT_EVENTS")
+    events = dict(PUSHIT_DEFAULT_EVENTS)
+    if not raw:
+        return events
+    import json
+
+    try:
+        configured = json.loads(raw)
+    except ValueError:
+        # A malformed policy must not silently disable every notification, nor
+        # crash the site: keep the defaults and say so.
+        import logging
+
+        logging.getLogger("apps.commands").warning(
+            "PUSHIT_EVENTS is not valid JSON, falling back to the defaults"
+        )
+        return events
+    if isinstance(configured, dict):
+        for name in events:
+            if name in configured:
+                events[name] = bool(configured[name])
+    return events
+
+
+PUSHIT_EVENTS = _pushit_events()
+
+#: Sending needs the switch AND a token: a token alone must not start pushing,
+#: and the switch alone has nothing to push with.
+PUSHIT_ACTIVE = bool(PUSHIT_ENABLED and PUSHIT_APP_TOKEN and PUSHIT_BASE_URL)
+
 # Sentry (OPERATIONS.md §3.8).
 SENTRY_DSN = _env("SENTRY_DSN")
 

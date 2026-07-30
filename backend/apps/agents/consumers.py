@@ -25,6 +25,11 @@ from apps.commands.models import (
     CommandStatus,
     PermissionRequest,
 )
+from apps.commands.notifications import (
+    notify_agent_offline,
+    notify_command_finished,
+    notify_permission_request,
+)
 from apps.conversations.services import (
     sync_message_for_command_completed,
     sync_message_for_command_failed,
@@ -193,6 +198,8 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
             )
             sync_message_for_command_failed(command)
             publish_command_updated(command)
+        if in_flight:
+            notify_agent_offline(agent.name, len(in_flight))
 
     def _touch_agent(self) -> None:
         if self.agent is None:
@@ -292,6 +299,9 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         command.save(update_fields=["status", "updated_at"])
         publish_permission_request(command, request)
         publish_command_updated(command)
+        # The operator may not be looking at the browser: the whole point of the
+        # approval bridge is being reachable.
+        notify_permission_request(command, request)
 
     def _mark_command_completed(self, payload: dict[str, object]) -> None:
         command = self._load_command(
@@ -309,6 +319,7 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         agent = Agent.objects.get(id=command.agent_id)
         publish_command_updated(command)
         publish_agent_updated(agent)
+        notify_command_finished(command)
 
     def _mark_command_failed(self, payload: dict[str, object]) -> None:
         is_cancelled = payload.get("cancelled") is True
@@ -330,3 +341,4 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         agent = Agent.objects.get(id=command.agent_id)
         publish_command_updated(command)
         publish_agent_updated(agent)
+        notify_command_finished(command)
