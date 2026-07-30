@@ -234,9 +234,19 @@ FABRIC_COMMAND_GRACE_SECONDS = int(_env("FABRIC_COMMAND_GRACE_SECONDS", "30"))
 #: an agent that can run code, so it must not live forever.
 FABRIC_TOKEN_TTL_HOURS = int(_env("FABRIC_TOKEN_TTL_HOURS", "168"))
 
-# Sentry (OPERATIONS.md §3.8) — optional so local development stays offline.
+# Sentry (OPERATIONS.md §3.8).
 SENTRY_DSN = _env("SENTRY_DSN")
-if SENTRY_DSN:  # pragma: no cover - exercised in production only
+
+#: A DSN alone must NOT be enough to start reporting. A production DSN copied
+#: into a developer's `.env` would otherwise send every local crash into the
+#: production project, drowning real incidents in noise — exactly what happened
+#: to pushit-backend (31 events from a Windows dev box). Reporting therefore
+#: requires being in PROD, or an explicit opt-in for deliberate local testing.
+SENTRY_ENABLED = bool(SENTRY_DSN) and (
+    STATE == "PROD" or _env_bool("SENTRY_ENABLE", False)
+)
+
+if SENTRY_ENABLED:  # pragma: no cover - exercised in production only
     import sentry_sdk
 
     sentry_sdk.init(
