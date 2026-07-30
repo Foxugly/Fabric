@@ -143,3 +143,30 @@ export interface CommandOption {
   payloadTemplate: Record<string, unknown>;
   timeoutSeconds: number;
 }
+
+export type NotificationEvent =
+  | 'permission_request'
+  | 'claude_turn_completed'
+  | 'claude_turn_failed'
+  | 'agent_offline';
+
+export interface NotificationTarget {
+  id: number;
+  name: string;
+  app_token: string;
+  base_url: string;
+  title: string;
+  enabled: boolean;
+  /** Only the keys the user overrode; the rest come from the site defaults. */
+  events: Partial<Record<NotificationEvent, boolean>>;
+  /** The policy actually applied, defaults filled in. Read-only. */
+  effective_events: Record<NotificationEvent, boolean>;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type NotificationTargetDraft = Pick<
+  NotificationTarget,
+  'name' | 'app_token' | 'base_url' | 'title' | 'enabled' | 'events' | 'is_default'
+>;

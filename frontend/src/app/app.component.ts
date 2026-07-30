@@ -14,6 +14,7 @@ import { firstValueFrom, Subscription } from 'rxjs';
 import { TerminalModule, TerminalService } from 'primeng/terminal';
 
 import { Agent, AuthSession, Command, CommandStatus, FabricEvent } from './models';
+import { NotificationsPanelComponent } from './notifications-panel.component';
 
 import { AgentService } from './services/agent.service';
 import { AuthService } from './services/auth.service';
@@ -50,7 +51,7 @@ interface PendingPermission {
 @Component({
   selector: 'fabric-root',
   standalone: true,
-  imports: [FormsModule, NgClass, NgFor, NgIf, TerminalModule],
+  imports: [FormsModule, NgClass, NgFor, NgIf, NotificationsPanelComponent, TerminalModule],
   providers: [TerminalService],
   template: `
     <div class="shell">
@@ -114,6 +115,13 @@ interface PendingPermission {
             >
               Copy output
             </button>
+            <button
+              type="button"
+              class="secondary-button"
+              (click)="showNotifications.set(true)"
+            >
+              Notifications
+            </button>
             <button type="button" class="secondary-button" (click)="logout()">Sign out</button>
           </div>
         </header>
@@ -159,6 +167,11 @@ interface PendingPermission {
             [style]="{ height: 'calc(100vh - 116px)' }"
           />
         </main>
+
+        <fabric-notifications-panel
+          *ngIf="showNotifications()"
+          (close)="showNotifications.set(false)"
+        />
 
         <section class="runtime-error" *ngIf="displayError() as errorMessage">
           <pre>{{ errorMessage }}</pre>
@@ -514,6 +527,7 @@ export class AppComponent implements OnDestroy {
   readonly claudePermissionMode = signal(DEFAULT_CLAUDE_PERMISSION_MODE);
   readonly pendingPermission = signal<PendingPermission | null>(null);
   readonly decidingPermission = signal(false);
+  readonly showNotifications = signal(false);
 
   private activeCommandSawProgress = false;
   private activeCommandLastSequence = 0;
@@ -549,6 +563,7 @@ export class AppComponent implements OnDestroy {
           this.powerShellSessionId.set(null);
           this.claudeSessionId.set(null);
           this.activeCommandId.set(null);
+          this.showNotifications.set(false);
           this.agents.set([]);
           this.resetStreamingState();
           this.resumedTerminalState = false;

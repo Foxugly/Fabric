@@ -71,6 +71,38 @@ Pendant un tour, le terminal affiche :
 `Ctrl+C` ou le bouton *Cancel* annule le tour : le processus `claude` est tué
 sur la machine Windows, et la commande passe en `cancelled`.
 
+## Notifications
+
+Le tour est réellement suspendu pendant une demande d'autorisation, donc si tu
+n'es pas devant l'écran, il attend. Le bouton **Notifications** de la barre du
+haut configure une cible PushIT pour être prévenu.
+
+La configuration est **par utilisateur, en base** (modèle `PushItTarget`, calqué
+sur `accounts.PushItTarget` de FoxRunner) : « qui notifier » suit le propriétaire
+de la commande, pas une clé globale. Il faut le jeton `apt_…` d'une application
+PushIT ; il est stocké en base et rendu à son propre propriétaire, pour que
+l'éditeur puisse l'afficher — c'est un jeton d'émission seule, il ne permet pas
+de lire les notifications.
+
+Quatre événements, cochables indépendamment :
+
+| Événement | Défaut | Pourquoi |
+|---|:--:|---|
+| Autorisation demandée | ✅ | le tour est bloqué jusqu'à la réponse |
+| Tour Claude terminé | ✅ | avec le début de la réponse |
+| Tour en échec | ✅ | échec, annulation, expiration |
+| Agent déconnecté | ❌ | seulement si des commandes étaient en cours |
+
+Volontairement limité à Claude : un `git status` PowerShell qui se termine ne
+mérite pas de faire vibrer un téléphone.
+
+Décocher **Activé** coupe les notifications sans perdre le jeton. Et si PushIT
+est injoignable, Fabric continue : l'envoi est sur un fil séparé, les échecs sont
+journalisés et jamais propagés à la commande.
+
+Les variables `PUSHIT_*` côté SSM ne servent que de repli quand un utilisateur
+n'a aucune cible.
+
 ## Limites connues
 
 - Un tour = un processus `claude -p`. Les hooks, MCP et skills configurés
