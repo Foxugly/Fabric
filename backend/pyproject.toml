@@ -20,7 +20,7 @@ dependencies = [
   # support: its blocking group reads fail with a bogus
   # "Timeout reading from 127.0.0.1:6379" and every WebSocket dies with a 1011.
   # channels-redis declares no upper bound, so this pin is ours to hold.
-  "redis>=5.0,<8.0",
+  "redis>=5.0,<9.0",
   "psycopg[binary]>=3.2,<4.0",
   "sentry-sdk[django]>=2.0,<3.0",
 ]
