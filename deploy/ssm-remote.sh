@@ -70,6 +70,27 @@ sudo -u django mkdir -p "$SPA_DIR"
 tar -xzf "$TMP/spa.tar.gz" -C "$SPA_DIR" --no-same-owner
 rm -rf "$TMP"
 
+# Frontend Sentry config, substituted into index.html from the SSM-fetched env.
+# The fleet normally injects SPA config with an nginx sub_filter, which needs a
+# CSP nonce; a single-origin vhost has no sub_filter, so this is done once at
+# deploy time instead. Same variable names as §3.8. Placeholders left as-is when
+# unset, and the SPA treats a leftover placeholder as "Sentry off".
+if [ -r /run/fabric/.env ]; then
+    DSN=$(sed -n 's/^SENTRY_FRONTEND_DSN=//p' /run/fabric/.env | head -1)
+    ENVN=$(sed -n 's/^SENTRY_FRONTEND_ENV=//p' /run/fabric/.env | head -1)
+    if [ -n "$DSN" ]; then
+        echo "== inject frontend Sentry config =="
+        # `|` as the sed delimiter: a DSN is full of slashes.
+        sed -i \
+            -e "s|__FABRIC_SENTRY_FRONTEND_DSN__|${DSN}|g" \
+            -e "s|__FABRIC_SENTRY_FRONTEND_ENV__|${ENVN:-PROD}|g" \
+            -e "s|__FABRIC_SENTRY_FRONTEND_RELEASE__|__SHA__|g" \
+            "$SPA_DIR/index.html"
+    else
+        echo "== frontend Sentry not configured (SENTRY_FRONTEND_DSN unset) =="
+    fi
+fi
+
 echo "== backend deploy (as django) =="
 sudo -u django bash "$APP_DIR/deploy/ssm-deploy.sh"
 

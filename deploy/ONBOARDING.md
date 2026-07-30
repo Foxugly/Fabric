@@ -276,10 +276,22 @@ aws ssm put-parameter --region eu-west-1 --name /fabric/prod/SENTRY_ENVIRONMENT 
 sudo systemctl restart fabric-env-fetch fabric-asgi   # sur la box
 ```
 
-> **Sentry frontend : pas encore câblé.** La SPA n'a pas de mécanisme de config
-> runtime (choix assumé du vhost unique : pas de `sub_filter`). Le brancher
-> demandera soit un `/fabric-frontend/prod` + injection, soit un DSN à la
-> compilation. C'est le seul point de §3.12 non couvert.
+Et pour le frontend (`SENTRY_FRONTEND_*`, mêmes noms que §3.8) :
+
+```bash
+aws ssm put-parameter --region eu-west-1 --name /fabric/prod/SENTRY_FRONTEND_DSN   --value '<dsn frontend>' --type String --overwrite
+aws ssm put-parameter --region eu-west-1 --name /fabric/prod/SENTRY_FRONTEND_ENV   --value PROD --type String --overwrite
+```
+
+Le DSN frontend est **substitué dans `index.html` au moment du déploiement**
+(`deploy/ssm-remote.sh`), et non injecté à l'exécution : le vhost unique n'a pas
+de `sub_filter`, et une balise `<meta>` évite le script inline qu'interdit la CSP.
+Il faut donc **un déploiement** pour qu'un changement de DSN prenne effet, là où
+les autres sites suffisent d'un redémarrage du `*-frontend-runtime-fetch`.
+Tant que le paramètre est absent, la SPA voit le placeholder et laisse Sentry éteint.
+
+La CSP autorise `https://*.ingest.de.sentry.io` en `connect-src` — sans quoi les
+rapports seraient bloqués silencieusement par le navigateur.
 
 ## 8. Monitoring (§3.9)
 

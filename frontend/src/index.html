@@ -5,6 +5,16 @@
     <title>Fabric</title>
     <base href="/">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!--
+      Sentry config, substituted at deploy time from /run/fabric/.env
+      (deploy/ssm-remote.sh). Meta tags rather than an injected inline script:
+      the CSP forbids inline scripts, and a single-origin vhost has no nginx
+      sub_filter to hang runtime config on. Left as placeholders in dev, where
+      Sentry stays off.
+    -->
+    <meta name="fabric-sentry-dsn" content="__FABRIC_SENTRY_FRONTEND_DSN__">
+    <meta name="fabric-sentry-env" content="__FABRIC_SENTRY_FRONTEND_ENV__">
+    <meta name="fabric-sentry-release" content="__FABRIC_SENTRY_FRONTEND_RELEASE__">
   </head>
   <body>
     <div id="fabric-runtime-error" style="display:none;position:fixed;right:16px;bottom:16px;z-index:2147483647;max-width:min(calc(100vw - 32px),720px);padding:12px;background:#3a1d1d;color:#ffd7d7;border:1px solid #c53030;font-family:Consolas,'Courier New',monospace;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;"></div>

@@ -4,7 +4,11 @@ import { providePrimeNG } from 'primeng/config';
 import Aura from '@primeuix/themes/aura';
 
 import { AppComponent } from './app/app.component';
+import { initSentry, sentryProviders } from './app/sentry';
 import { authInterceptor } from './app/services/auth.interceptor';
+
+// Before bootstrap, so a failure during startup is still reported.
+const sentryEnabled = initSentry();
 
 const reportRuntimeProblem = (message: string): void => {
   console.error(message);
@@ -43,6 +47,7 @@ bootstrapApplication(AppComponent, {
         preset: Aura,
       },
     }),
+    ...(sentryEnabled ? sentryProviders() : []),
   ],
 }).catch((error: unknown) => {
   reportRuntimeProblem(
