@@ -1,0 +1,49 @@
+{
+  "app": {
+    "title": "Fabric"
+  },
+  "status": {
+    "sessionOpen": "session ouverte",
+    "running": "en cours"
+  },
+  "toolbar": {
+    "workingDirectoryPlaceholder": "Répertoire de travail (ex. C:\\Projects\\mon-depot)",
+    "open": "Ouvrir",
+    "close": "Fermer",
+    "cancel": "Annuler",
+    "copyOutput": "Copier la sortie",
+    "notifications": "Notifications",
+    "signOut": "Se déconnecter"
+  },
+  "approval": {
+    "allow": "Autoriser",
+    "deny": "Refuser"
+  },
+  "login": {
+    "username": "Identifiant",
+    "password": "Mot de passe",
+    "signIn": "Se connecter"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "close": "Fermer",
+    "loading": "Chargement…",
+    "events": "Événements",
+    "notificationTitle": "Titre des notifications",
+    "addTarget": "Ajouter une cible",
+    "name": "Nom (ex. téléphone)",
+    "appToken": "Jeton d'application",
+    "tokenPlaceholder": "apt_…",
+    "save": "Enregistrer",
+    "delete": "Supprimer",
+    "default": "Par défaut",
+    "isDefault": "par défaut",
+    "enabledHint": "Activé — décoche pour couper sans perdre le jeton",
+    "empty": "Aucune cible. Crées-en une avec le jeton apt_… d'une application PushIT.",
+    "intro": "Fabric prévient sur ton téléphone via PushIT — surtout quand Claude attend une réponse.",
+    "defaultTargetName": "téléphone"
+  },
+  "language": {
+    "switch": "Changer de langue"
+  }
+}
