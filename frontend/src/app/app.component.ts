@@ -21,6 +21,8 @@ import { AuthService } from './services/auth.service';
 import { CommandService } from './services/command.service';
 import { EventStreamService } from './services/event-stream.service';
 import { RuntimeErrorService } from './services/runtime-error.service';
+import { TranslocoPipe } from '@jsverse/transloco';
+import { LanguageSwitcherComponent } from './i18n/language-switcher.component';
 
 const FINAL_COMMAND_STATUSES = new Set<CommandStatus>([
   'succeeded',
@@ -51,21 +53,21 @@ interface PendingPermission {
 @Component({
   selector: 'fabric-root',
   standalone: true,
-  imports: [FormsModule, NgClass, NgFor, NgIf, NotificationsPanelComponent, TerminalModule],
+  imports: [FormsModule, NgClass, NgFor, NgIf, NotificationsPanelComponent, TerminalModule, TranslocoPipe, LanguageSwitcherComponent],
   providers: [TerminalService],
   template: `
     <div class="shell">
       <ng-container *ngIf="session(); else loginView">
         <header class="topbar">
           <div class="brand">
-            <h1>Fabric</h1>
+            <h1>{{ 'app.title' | transloco }}</h1>
             <div class="status-row">
               <span class="status-dot" [ngClass]="selectedAgentStatus()"></span>
               <span class="status-text">{{ selectedAgentStatus() }}</span>
               <span class="separator" *ngIf="powerShellSessionId()">·</span>
-              <span class="status-text" *ngIf="powerShellSessionId()">session open</span>
+              <span class="status-text" *ngIf="powerShellSessionId()">{{ 'status.sessionOpen' | transloco }}</span>
               <span class="separator" *ngIf="activeCommandId()">·</span>
-              <span class="status-text" *ngIf="activeCommandId()">running</span>
+              <span class="status-text" *ngIf="activeCommandId()">{{ 'status.running' | transloco }}</span>
             </div>
           </div>
 
@@ -81,7 +83,7 @@ interface PendingPermission {
             <input
               [ngModel]="workingDirectory()"
               (ngModelChange)="workingDirectory.set($event)"
-              placeholder="Working directory (e.g. C:\\Projects\\my-repo)"
+              [placeholder]="'toolbar.workingDirectoryPlaceholder' | transloco"
               [disabled]="controlsLocked()"
             />
             <button
@@ -89,7 +91,7 @@ interface PendingPermission {
               [disabled]="controlsLocked() || selectedAgent() === null || selectedAgentStatus() === 'offline'"
               (click)="openSession()"
             >
-              Open
+              {{ 'toolbar.open' | transloco }}
             </button>
             <button
               type="button"
@@ -97,7 +99,7 @@ interface PendingPermission {
               [disabled]="controlsLocked() || powerShellSessionId() === null"
               (click)="closeSession()"
             >
-              Close
+              {{ 'toolbar.close' | transloco }}
             </button>
             <button
               type="button"
@@ -105,7 +107,7 @@ interface PendingPermission {
               [disabled]="activeCommandId() === null"
               (click)="cancelActiveCommand()"
             >
-              Cancel
+              {{ 'toolbar.cancel' | transloco }}
             </button>
             <button
               type="button"
@@ -113,16 +115,17 @@ interface PendingPermission {
               [disabled]="!hasTerminalOutput()"
               (click)="copyTerminalOutput()"
             >
-              Copy output
+              {{ 'toolbar.copyOutput' | transloco }}
             </button>
             <button
               type="button"
               class="secondary-button"
               (click)="showNotifications.set(true)"
             >
-              Notifications
+              {{ 'toolbar.notifications' | transloco }}
             </button>
-            <button type="button" class="secondary-button" (click)="logout()">Sign out</button>
+            <app-language-switcher />
+            <button type="button" class="secondary-button" (click)="logout()">{{ 'toolbar.signOut' | transloco }}</button>
           </div>
         </header>
 
@@ -143,17 +146,13 @@ interface PendingPermission {
               class="permission__allow"
               [disabled]="decidingPermission()"
               (click)="decidePermission(true)"
-            >
-              Autoriser
-            </button>
+            >{{ 'approval.allow' | transloco }}</button>
             <button
               type="button"
               class="permission__deny"
               [disabled]="decidingPermission()"
               (click)="decidePermission(false)"
-            >
-              Refuser
-            </button>
+            >{{ 'approval.deny' | transloco }}</button>
           </div>
         </section>
 
@@ -182,13 +181,13 @@ interface PendingPermission {
         <div class="login-shell">
           <section class="login-panel">
             <form (ngSubmit)="submitLogin()">
-              <h2>Sign in</h2>
+              <h2>{{ 'login.signIn' | transloco }}</h2>
               <input
                 name="username"
                 [ngModel]="loginUsername()"
                 (ngModelChange)="loginUsername.set($event)"
                 autocomplete="username"
-                placeholder="Username"
+                [placeholder]="'login.username' | transloco"
               />
               <input
                 type="password"
@@ -196,9 +195,9 @@ interface PendingPermission {
                 [ngModel]="loginPassword()"
                 (ngModelChange)="loginPassword.set($event)"
                 autocomplete="current-password"
-                placeholder="Password"
+                [placeholder]="'login.password' | transloco"
               />
-              <button type="submit">Sign in</button>
+              <button type="submit">{{ 'login.signIn' | transloco }}</button>
               <div class="login-error" *ngIf="loginError()">{{ loginError() }}</div>
             </form>
           </section>

@@ -12,6 +12,7 @@ import { firstValueFrom } from 'rxjs';
 
 import { NotificationEvent, NotificationTarget } from './models';
 import { NotificationTargetService } from './services/notification-target.service';
+import { TranslocoPipe, TranslocoService } from '@jsverse/transloco';
 
 interface EventChoice {
   key: NotificationEvent;
@@ -29,22 +30,21 @@ interface EventChoice {
 @Component({
   selector: 'fabric-notifications-panel',
   standalone: true,
-  imports: [FormsModule, NgFor, NgIf],
+  imports: [FormsModule, NgFor, NgIf, TranslocoPipe],
   template: `
     <div class="scrim" (click)="close.emit()"></div>
-    <section class="panel" role="dialog" aria-label="Notifications">
+    <section class="panel" role="dialog" [attr.aria-label]="'notifications.title' | transloco">
       <header>
-        <h2>Notifications</h2>
-        <button type="button" class="ghost" (click)="close.emit()">Fermer</button>
+        <h2>{{ 'notifications.title' | transloco }}</h2>
+        <button type="button" class="ghost" (click)="close.emit()">{{ 'notifications.close' | transloco }}</button>
       </header>
 
       <p class="intro">
-        Fabric prévient sur ton téléphone via PushIT — surtout quand Claude
-        attend une autorisation, puisque le tour reste bloqué jusque-là.
+        {{ 'notifications.intro' | transloco }}
       </p>
 
       <p class="error" *ngIf="error()">{{ error() }}</p>
-      <p class="muted" *ngIf="loading()">Chargement…</p>
+      <p class="muted" *ngIf="loading()">{{ 'notifications.loading' | transloco }}</p>
 
       <article class="target" *ngFor="let target of targets(); trackBy: trackById">
         <div class="target__head">
@@ -52,24 +52,24 @@ interface EventChoice {
             class="target__name"
             [ngModel]="target.name"
             (ngModelChange)="patchLocal(target, { name: $event })"
-            placeholder="Nom (ex. téléphone)"
+            [placeholder]="'notifications.name' | transloco"
           />
-          <span class="badge" *ngIf="target.is_default">par défaut</span>
+          <span class="badge" *ngIf="target.is_default">{{ 'notifications.isDefault' | transloco }}</span>
         </div>
 
         <label class="row">
-          <span>Jeton d'application</span>
+          <span>{{ 'notifications.appToken' | transloco }}</span>
           <input
             [ngModel]="target.app_token"
             (ngModelChange)="patchLocal(target, { app_token: $event })"
-            placeholder="apt_…"
+            [placeholder]="'notifications.tokenPlaceholder' | transloco"
             autocomplete="off"
             spellcheck="false"
           />
         </label>
 
         <label class="row">
-          <span>Titre des notifications</span>
+          <span>{{ 'notifications.notificationTitle' | transloco }}</span>
           <input
             [ngModel]="target.title"
             (ngModelChange)="patchLocal(target, { title: $event })"
@@ -83,11 +83,11 @@ interface EventChoice {
             [ngModel]="target.enabled"
             (ngModelChange)="patchLocal(target, { enabled: $event })"
           />
-          <span>Activé — décoche pour couper sans perdre le jeton</span>
+          <span>{{ 'notifications.enabledHint' | transloco }}</span>
         </label>
 
         <fieldset>
-          <legend>Événements</legend>
+          <legend>{{ 'notifications.events' | transloco }}</legend>
           <label class="check" *ngFor="let choice of eventChoices">
             <input
               type="checkbox"
@@ -106,37 +106,28 @@ interface EventChoice {
             type="button"
             [disabled]="busy()"
             (click)="save(target)"
-          >
-            Enregistrer
-          </button>
+          >{{ 'notifications.save' | transloco }}</button>
           <button
             type="button"
             class="ghost"
             *ngIf="!target.is_default"
             [disabled]="busy()"
             (click)="makeDefault(target)"
-          >
-            Par défaut
-          </button>
+          >{{ 'notifications.default' | transloco }}</button>
           <button
             type="button"
             class="danger"
             [disabled]="busy()"
             (click)="remove(target)"
-          >
-            Supprimer
-          </button>
+          >{{ 'notifications.delete' | transloco }}</button>
         </div>
       </article>
 
       <p class="muted" *ngIf="!loading() && targets().length === 0">
-        Aucune cible. Crées-en une avec le jeton <code>apt_…</code> d'une
-        application PushIT.
+        {{ 'notifications.empty' | transloco }}
       </p>
 
-      <button type="button" class="add" [disabled]="busy()" (click)="addDraft()">
-        Ajouter une cible
-      </button>
+      <button type="button" class="add" [disabled]="busy()" (click)="addDraft()">{{ 'notifications.addTarget' | transloco }}</button>
     </section>
   `,
   styles: [`
@@ -326,6 +317,7 @@ interface EventChoice {
 })
 export class NotificationsPanelComponent implements OnInit {
   private readonly service = inject(NotificationTargetService);
+  private readonly transloco = inject(TranslocoService);
 
   readonly close = output<void>();
 
@@ -387,7 +379,8 @@ export class NotificationsPanelComponent implements OnInit {
     // Negative id marks a row that does not exist server-side yet.
     const draft: NotificationTarget = {
       id: -Date.now(),
-      name: 'téléphone',
+      // Valeur pre-remplie, donc visible : elle se traduit comme le reste.
+      name: this.transloco.translate('notifications.defaultTargetName'),
       app_token: '',
       base_url: 'https://pushit-api.foxugly.com',
       title: 'Fabric',

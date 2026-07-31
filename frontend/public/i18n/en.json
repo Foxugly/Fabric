@@ -1,0 +1,49 @@
+{
+  "app": {
+    "title": "Fabric"
+  },
+  "status": {
+    "sessionOpen": "session open",
+    "running": "running"
+  },
+  "toolbar": {
+    "workingDirectoryPlaceholder": "Working directory (e.g. C:\\Projects\\my-repo)",
+    "open": "Open",
+    "close": "Close",
+    "cancel": "Cancel",
+    "copyOutput": "Copy output",
+    "notifications": "Notifications",
+    "signOut": "Sign out"
+  },
+  "approval": {
+    "allow": "Allow",
+    "deny": "Deny"
+  },
+  "login": {
+    "username": "Username",
+    "password": "Password",
+    "signIn": "Sign in"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "close": "Close",
+    "loading": "Loading…",
+    "events": "Events",
+    "notificationTitle": "Notification title",
+    "addTarget": "Add a target",
+    "name": "Name (e.g. phone)",
+    "appToken": "Application token",
+    "tokenPlaceholder": "apt_…",
+    "save": "Save",
+    "delete": "Delete",
+    "default": "Default",
+    "isDefault": "default",
+    "enabledHint": "Enabled — untick to mute without losing the token",
+    "empty": "No target yet. Create one with the apt_… token of a PushIT application.",
+    "intro": "Fabric notifies you on your phone through PushIT — above all when Claude is waiting on you.",
+    "defaultTargetName": "phone"
+  },
+  "language": {
+    "switch": "Change language"
+  }
+}

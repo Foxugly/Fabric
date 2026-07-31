@@ -1,0 +1,49 @@
+{
+  "app": {
+    "title": "Fabric"
+  },
+  "status": {
+    "sessionOpen": "sesión abierta",
+    "running": "en curso"
+  },
+  "toolbar": {
+    "workingDirectoryPlaceholder": "Directorio de trabajo (p. ej. C:\\Projects\\mi-repo)",
+    "open": "Abrir",
+    "close": "Cerrar",
+    "cancel": "Cancelar",
+    "copyOutput": "Copiar la salida",
+    "notifications": "Notificaciones",
+    "signOut": "Cerrar sesión"
+  },
+  "approval": {
+    "allow": "Autorizar",
+    "deny": "Rechazar"
+  },
+  "login": {
+    "username": "Usuario",
+    "password": "Contraseña",
+    "signIn": "Iniciar sesión"
+  },
+  "notifications": {
+    "title": "Notificaciones",
+    "close": "Cerrar",
+    "loading": "Cargando…",
+    "events": "Eventos",
+    "notificationTitle": "Título de las notificaciones",
+    "addTarget": "Añadir un destino",
+    "name": "Nombre (p. ej. teléfono)",
+    "appToken": "Token de aplicación",
+    "tokenPlaceholder": "apt_…",
+    "save": "Guardar",
+    "delete": "Eliminar",
+    "default": "Predeterminado",
+    "isDefault": "predeterminado",
+    "enabledHint": "Activado — desmarca para silenciar sin perder el token",
+    "empty": "Sin destinos. Crea uno con el token apt_… de una aplicación PushIT.",
+    "intro": "Fabric te avisa en el teléfono mediante PushIT — sobre todo cuando Claude te está esperando.",
+    "defaultTargetName": "teléfono"
+  },
+  "language": {
+    "switch": "Cambiar de idioma"
+  }
+}

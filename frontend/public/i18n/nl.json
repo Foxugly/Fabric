@@ -1,0 +1,49 @@
+{
+  "app": {
+    "title": "Fabric"
+  },
+  "status": {
+    "sessionOpen": "sessie open",
+    "running": "bezig"
+  },
+  "toolbar": {
+    "workingDirectoryPlaceholder": "Werkmap (bv. C:\\Projects\\mijn-repo)",
+    "open": "Openen",
+    "close": "Sluiten",
+    "cancel": "Annuleren",
+    "copyOutput": "Uitvoer kopiëren",
+    "notifications": "Meldingen",
+    "signOut": "Afmelden"
+  },
+  "approval": {
+    "allow": "Toestaan",
+    "deny": "Weigeren"
+  },
+  "login": {
+    "username": "Gebruikersnaam",
+    "password": "Wachtwoord",
+    "signIn": "Aanmelden"
+  },
+  "notifications": {
+    "title": "Meldingen",
+    "close": "Sluiten",
+    "loading": "Laden…",
+    "events": "Gebeurtenissen",
+    "notificationTitle": "Titel van de meldingen",
+    "addTarget": "Een doel toevoegen",
+    "name": "Naam (bv. telefoon)",
+    "appToken": "Applicatietoken",
+    "tokenPlaceholder": "apt_…",
+    "save": "Opslaan",
+    "delete": "Verwijderen",
+    "default": "Standaard",
+    "isDefault": "standaard",
+    "enabledHint": "Ingeschakeld — vink uit om te dempen zonder het token te verliezen",
+    "empty": "Nog geen doel. Maak er een aan met het apt_…-token van een PushIT-applicatie.",
+    "intro": "Fabric waarschuwt je op je telefoon via PushIT — vooral wanneer Claude op je wacht.",
+    "defaultTargetName": "telefoon"
+  },
+  "language": {
+    "switch": "Taal wijzigen"
+  }
+}
