@@ -12,6 +12,36 @@ concurrency:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    # La suite tournait sur SQLite (DB_ENGINE absent -> branche sqlite dans
+    # config/settings.py) alors que la production tourne sur PostgreSQL 16
+    # (DB_ENGINE=postgresql sur la box). SQLite est plus permissif et laisse
+    # passer des requetes que PostgreSQL refuse — c'est ainsi que deux endpoints
+    # casses ont vecu en production sur QuizOnline sans qu'aucun test ne les
+    # voie. On teste donc sur le moteur de production.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fabric
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # Convention DB_* 6 variables de la flotte (OPERATIONS.md §3.13).
+      # Au niveau du job : les etapes migrations ET tests doivent voir la meme
+      # base, sinon on verifie l'etat des migrations contre un autre moteur.
+      DB_ENGINE: postgresql
+      DB_NAME: fabric
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: postgres
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
