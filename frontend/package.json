@@ -10,25 +10,25 @@
   },
   "dependencies": {
     "@angular/cdk": "^21.2.14",
-    "@angular/common": "^21.2.19",
-    "@angular/compiler": "^21.2.19",
-    "@angular/core": "^21.2.19",
-    "@angular/forms": "^21.2.19",
-    "@angular/platform-browser": "^21.2.19",
-    "@angular/router": "^21.2.19",
+    "@angular/common": "^21.2.22",
+    "@angular/compiler": "^21.2.22",
+    "@angular/core": "^21.2.22",
+    "@angular/forms": "^21.2.22",
+    "@angular/platform-browser": "^21.2.22",
+    "@angular/router": "^21.2.22",
     "@jsverse/transloco": "^8.4.0",
     "@primeuix/themes": "^2.0.3",
-    "@sentry/angular": "^10.69.0",
+    "@sentry/angular": "^10.73.0",
     "primeicons": "^8.0.0",
     "primeng": "^21.1.9",
     "rxjs": "^7.8.2",
     "tslib": "^2.8.1",
-    "zone.js": "^0.16.2"
+    "zone.js": "^0.16.3"
   },
   "devDependencies": {
-    "@angular/build": "^21.0.0",
-    "@angular/cli": "^21.0.0",
-    "@angular/compiler-cli": "^21.2.19",
+    "@angular/build": "^21.2.23",
+    "@angular/cli": "^21.2.23",
+    "@angular/compiler-cli": "^21.2.22",
     "typescript": "^5.9.3"
   }
 }
