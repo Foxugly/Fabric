@@ -1,0 +1,8 @@
+repos:
+  # Même version de ruff que backend/pyproject.toml et agent/pyproject.toml (extra dev),
+  # donc que la CI : à changer ensemble.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.5
+    hooks:
+      - id: ruff
+        files: ^(backend|agent)/
