@@ -112,7 +112,10 @@ if _db_engine:
             "PASSWORD": os.environ.get("DB_PASSWORD", ""),
             "HOST": _env("DB_HOST", "127.0.0.1"),
             "PORT": _env("DB_PORT", "5432"),
-            "CONN_MAX_AGE": 60,
+            # 0 under daphne (OPERATIONS.md §3.22): persistent connections are
+            # for gunicorn only. In ASGI every sync_to_async thread would keep
+            # its own connection open, and PostgreSQL runs out of slots.
+            "CONN_MAX_AGE": 0,
         }
     }
 else:
