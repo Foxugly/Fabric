@@ -7,7 +7,10 @@ from apps.api_auth.views import (
     LoginView,
     LogoutView,
     MeView,
+    PasswordChangeView,
     PushItTargetViewSet,
+    TokenRefreshView,
+    WebSocketTicketView,
 )
 from apps.commands.views import CommandViewSet
 from apps.conversations.views import ConversationViewSet, MessageViewSet
@@ -25,7 +28,16 @@ urlpatterns = [
     path("health/", health, name="health"),
     path("admin/", admin.site.urls),
     path("api/v1/auth/login/", LoginView.as_view(), name="auth-login"),
+    path("api/v1/auth/refresh/", TokenRefreshView.as_view(), name="auth-refresh"),
     path("api/v1/auth/logout/", LogoutView.as_view(), name="auth-logout"),
+    path(
+        "api/v1/auth/password/change/",
+        PasswordChangeView.as_view(),
+        name="auth-password-change",
+    ),
+    path(
+        "api/v1/auth/ws-ticket/", WebSocketTicketView.as_view(), name="auth-ws-ticket"
+    ),
     path("api/v1/auth/me/", MeView.as_view(), name="auth-me"),
     path(
         "api/v1/conversations/<uuid:conversation_pk>/messages/",

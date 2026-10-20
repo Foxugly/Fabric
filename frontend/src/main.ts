@@ -8,6 +8,7 @@ import Aura from '@primeuix/themes/aura';
 import { AppComponent } from './app/app.component';
 import { initSentry, sentryProviders } from './app/sentry';
 import { authInterceptor } from './app/services/auth.interceptor';
+import { AuthService } from './app/services/auth.service';
 import { AVAILABLE_LANGS, DEFAULT_LANG, FALLBACK_LANG } from './app/i18n/available-languages';
 import { LanguageService } from './app/i18n/language.service';
 import { TranslocoHttpLoader } from './app/i18n/transloco-loader';
@@ -63,6 +64,9 @@ bootstrapApplication(AppComponent, {
     provideAppInitializer(() => {
       inject(LanguageService).init();
     }),
+    // Restaure la session depuis le cookie HttpOnly de refresh (le jeton
+    // d'acces ne vit qu'en memoire) avant le premier rendu.
+    provideAppInitializer(() => inject(AuthService).restore()),
     providePrimeNG({
       theme: {
         preset: Aura,

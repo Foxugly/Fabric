@@ -115,21 +115,46 @@ def update_agent_presence(
     status: str | None = None,
     version: str = "",
     operating_system: str = "",
-) -> None:
+) -> bool:
+    """Record a live agent's presence. Returns False for a revoked agent.
+
+    A DISABLED agent stays DISABLED: the update is filtered on the status in the
+    database, so a socket that is still open (or a replayed `agent.hello`) can
+    never bring a revoked agent back online.
+    """
+    agent.refresh_from_db()
     now = timezone.now()
-    agent.status = status or AgentStatus.ONLINE
-    agent.version = version or agent.version
-    agent.operating_system = operating_system or agent.operating_system
-    agent.last_connected_at = now
-    agent.last_activity_at = now
-    agent.save(
-        update_fields=[
-            "status",
-            "version",
-            "operating_system",
-            "last_connected_at",
-            "last_activity_at",
-            "updated_at",
-        ]
+    updated = (
+        Agent.objects.filter(id=agent.id)
+        .exclude(status=AgentStatus.DISABLED)
+        .update(
+            status=status or AgentStatus.ONLINE,
+            version=version or agent.version,
+            operating_system=operating_system or agent.operating_system,
+            last_connected_at=now,
+            last_activity_at=now,
+            updated_at=now,
+        )
     )
+    agent.refresh_from_db()
+    if updated == 0:
+        return False
     publish_agent_updated(agent)
+    return True
+
+
+def disconnect_agent_sockets(
+    agent_id: object, *, code: int = 4401, except_channel: str = ""
+) -> None:
+    """Close the agent's open sockets now (revocation, rotation, takeover).
+
+    Authentication only happens at the handshake, so without this a socket
+    opened with a stolen token would outlive the token's revocation.
+    """
+    channel_layer = get_channel_layer()
+    if channel_layer is None:
+        return
+    async_to_sync(channel_layer.group_send)(
+        f"agent.{agent_id}",
+        {"type": "agent.disconnect", "code": code, "except": except_channel},
+    )

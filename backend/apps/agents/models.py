@@ -43,6 +43,10 @@ class Agent(models.Model):
     last_activity_at = models.DateTimeField(null=True, blank=True)
     capabilities = models.JSONField(default=list, blank=True)
     development_token_hash = models.CharField(max_length=64, blank=True)
+    #: Channel name of the one live agent socket. A new connection takes it
+    #: over (and closes the previous socket); a socket that no longer holds it
+    #: is closed on its next message and must not mark the agent offline.
+    active_channel = models.CharField(max_length=255, blank=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -50,17 +54,27 @@ class Agent(models.Model):
         return f"{self.name} ({self.id})"
 
     def issue_development_token(self) -> str:
+        """Mint a new token; the previous one stops working at once.
+
+        Issuing a token is the explicit action that brings a revoked agent
+        back: a DISABLED agent returns to OFFLINE and may connect again with
+        the new token only. Nothing else ever leaves DISABLED.
+        """
         raw_token = secrets.token_urlsafe(32)
-        self.development_token_hash = self._hash_token(raw_token)
+        self.development_token_hash = self.hash_token(raw_token)
         self.issued_token = raw_token
-        self.save(update_fields=["development_token_hash", "updated_at"])
+        update_fields = ["development_token_hash", "updated_at"]
+        if self.status == AgentStatus.DISABLED:
+            self.status = AgentStatus.OFFLINE
+            update_fields.insert(0, "status")
+        self.save(update_fields=update_fields)
         return raw_token
 
     def check_development_token(self, raw_token: str) -> bool:
         if not self.development_token_hash:
             return False
         return secrets.compare_digest(
-            self.development_token_hash, self._hash_token(raw_token)
+            self.development_token_hash, self.hash_token(raw_token)
         )
 
     def mark_online(self, *, version: str = "", operating_system: str = "") -> None:
@@ -82,6 +96,9 @@ class Agent(models.Model):
         )
 
     def mark_offline(self) -> None:
+        # A socket closing must never undo a revocation.
+        if self.status == AgentStatus.DISABLED:
+            return
         self.status = AgentStatus.OFFLINE
         self.save(update_fields=["status", "updated_at"])
 
@@ -98,5 +115,5 @@ class Agent(models.Model):
         self.save(update_fields=update_fields)
 
     @staticmethod
-    def _hash_token(raw_token: str) -> str:
+    def hash_token(raw_token: str) -> str:
         return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()

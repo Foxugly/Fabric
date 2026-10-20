@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 from django.contrib.auth import get_user_model
-from rest_framework.authtoken.models import Token
+from django.core.cache import cache
 from rest_framework.test import APIClient
 
 repo_root = Path(__file__).resolve().parents[2]
@@ -21,6 +21,15 @@ def _channel_layer_settings(settings: Any) -> None:
     }
 
 
+@pytest.fixture(autouse=True)
+def _clear_throttle_state() -> Any:
+    # DRF throttling counts in the cache, and every caller is throttled now:
+    # leaking counters across tests would make them order-dependent.
+    cache.clear()
+    yield
+    cache.clear()
+
+
 @pytest.fixture
 def api_user(db: Any) -> Any:
     user_model = get_user_model()
@@ -29,12 +38,6 @@ def api_user(db: Any) -> Any:
         password="fabric-password",
         is_staff=True,
     )
-
-
-@pytest.fixture
-def api_token(api_user: Any) -> str:
-    token, _ = Token.objects.get_or_create(user=api_user)
-    return token.key
 
 
 @pytest.fixture

@@ -1,6 +1,8 @@
 import { ErrorHandler, Provider } from '@angular/core';
 import * as Sentry from '@sentry/angular';
 
+import { scrubBreadcrumb, scrubEvent } from './sentry-scrub';
+
 /**
  * Sentry wiring driven by `<meta>` tags in index.html.
  *
@@ -37,8 +39,11 @@ export function initSentry(): boolean {
     // answered. None of that belongs in an error tracker.
     sendDefaultPii: false,
     tracesSampleRate: 0,
-    beforeBreadcrumb: (breadcrumb) =>
-      breadcrumb.category === 'console' ? null : breadcrumb,
+    // Tickets, JWT, Bearer values, request bodies and console breadcrumbs are
+    // scrubbed before anything leaves the browser (sentry-scrub.ts).
+    beforeSend: (event) => scrubEvent(event),
+    beforeSendTransaction: (event) => scrubEvent(event),
+    beforeBreadcrumb: (breadcrumb) => scrubBreadcrumb(breadcrumb),
   });
   return true;
 }

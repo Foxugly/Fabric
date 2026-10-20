@@ -6,8 +6,8 @@ import pytest
 from asgiref.sync import sync_to_async
 from channels.testing.websocket import WebsocketCommunicator
 from django.contrib.auth import get_user_model
-from rest_framework.authtoken.models import Token
 from shared.protocol import build_message
+from ws_helpers import agent_headers, events_path
 
 from apps.agents.models import Agent, AgentStatus
 from config.asgi import application
@@ -56,7 +56,8 @@ async def test_agent_websocket_authenticates_and_updates_status() -> None:
     token = await sync_to_async(agent.issue_development_token)()
     communicator = WebsocketCommunicator(
         application,
-        f"/ws/v1/agent/?agent_id={agent.id}&token={token}",
+        "/ws/v1/agent/",
+        headers=agent_headers(token),
     )
 
     connected, _ = await communicator.connect()
@@ -86,11 +87,10 @@ async def test_frontend_events_socket_receives_agent_updates() -> None:
         username="events-user",
         password="events-password",
     )
-    token = await Token.objects.acreate(user=user)
 
     event_communicator = WebsocketCommunicator(
         application,
-        f"/ws/v1/events/?token={token.key}",
+        await events_path(user),
         headers=BROWSER_HEADERS,
     )
     connected, _ = await event_communicator.connect()
@@ -100,7 +100,8 @@ async def test_frontend_events_socket_receives_agent_updates() -> None:
     agent_token = await sync_to_async(agent.issue_development_token)()
     agent_communicator = WebsocketCommunicator(
         application,
-        f"/ws/v1/agent/?agent_id={agent.id}&token={agent_token}",
+        "/ws/v1/agent/",
+        headers=agent_headers(agent_token),
     )
     agent_connected, _ = await agent_communicator.connect()
     assert agent_connected is True

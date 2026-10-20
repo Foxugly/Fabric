@@ -196,3 +196,22 @@ jobs:
               --path "/tmp/audit-$projet/lib/python3.12/site-packages" "${ignore[@]}"
             echo "::endgroup::"
           done
+
+  # Tests unitaires du SPA (vitest via @angular/build:unit-test, meme runner que
+  # PushIT_frontend). Job separe pour garder le nom `frontend` stable dans les
+  # checks requis ; a ajouter lui aussi aux checks requis de `main`.
+  frontend-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+      - name: Unit tests
+        working-directory: frontend
+        run: npm run test:ci
