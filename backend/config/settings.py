@@ -283,6 +283,22 @@ LOGGING = {
     },
 }
 
+#: Agent socket limits (M1): a frame above the size closes the socket (1009),
+#: so does a burst above the per-minute message count (1008). Claude streams
+#: one progress frame per delta, hence the generous rate.
+FABRIC_AGENT_MAX_MESSAGE_BYTES = int(
+    _env("FABRIC_AGENT_MAX_MESSAGE_BYTES", str(1024 * 1024))
+)
+FABRIC_AGENT_MAX_MESSAGES_PER_MINUTE = int(
+    _env("FABRIC_AGENT_MAX_MESSAGES_PER_MINUTE", "3000")
+)
+
+#: Output a command may store (progress deltas, then its result), in
+#: characters; beyond it the text is cut and ends with a marker (I4).
+FABRIC_COMMAND_OUTPUT_MAX_CHARS = int(
+    _env("FABRIC_COMMAND_OUTPUT_MAX_CHARS", "200000")
+)
+
 #: A command whose agent never reports back is timed out this long after its own
 #: `timeout_seconds` has elapsed.
 FABRIC_COMMAND_GRACE_SECONDS = int(_env("FABRIC_COMMAND_GRACE_SECONDS", "30"))
