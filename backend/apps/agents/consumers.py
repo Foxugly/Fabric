@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from asgiref.sync import sync_to_async
@@ -38,6 +39,15 @@ from apps.conversations.services import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+_FINGERPRINT = re.compile(r"[0-9a-f]{64}")
+
+
+def _fingerprint(value: object) -> str:
+    """The agent's SHA-256 of the request, kept only if it looks like one."""
+    if isinstance(value, str) and _FINGERPRINT.fullmatch(value):
+        return value
+    return ""
 
 
 class EventConsumer(AsyncJsonWebsocketConsumer):
@@ -348,6 +358,7 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
                 "tool_name": str(payload.get("tool_name", "")),
                 "tool_input": payload.get("input") or {},
                 "tool_use_id": str(payload.get("tool_use_id") or ""),
+                "fingerprint": _fingerprint(payload.get("fingerprint")),
             },
         )
         if not created:
