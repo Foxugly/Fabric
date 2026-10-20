@@ -19,6 +19,9 @@ claude              affiche le contexte courant (session, répertoire, mode)
 claude:status       sonde l'installation Claude Code de la machine
 claude:new          oublie l'identifiant de session : le prochain prompt en ouvre une neuve
 claude:mode <mode>  change le mode de permission
+claude:on           mode Claude : chaque ligne part à Claude, sans préfixe
+claude:off          retour à PowerShell
+!<commande>         en mode Claude, lance une commande PowerShell
 allow / deny [why]  répond à une demande d'autorisation en attente
 ```
 
@@ -28,6 +31,16 @@ L'agent n'accepte toutefois que `default` et `plan`, sauf si sa politique
 locale (`policy.toml` sur le PC, voir [agent/README.md](../agent/README.md))
 en autorise d'autres. Un mode refusé fait échouer la commande avec un message
 explicite.
+
+## Mode Claude (`claude:on`)
+
+`claude:on` envoie chaque ligne à Claude sans taper `claude` devant. L'invite
+devient `fabric[claude] $`. Restent inchangés : les commandes `claude…`, les
+commandes locales du terminal (`help`, `clear`, `cls`, `open`, `close`, `exit`,
+`cancel`) et `allow` / `deny`. `!<commande>` lance une seule commande
+PowerShell, par exemple `!git status`. `claude:off` revient à PowerShell. Le mode
+survit au rechargement de la page et se réinitialise à la déconnexion. Le
+routage est fait dans `frontend/src/app/terminal-routing.ts`.
 
 ## Continuité de session
 

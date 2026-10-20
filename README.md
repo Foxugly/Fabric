@@ -136,6 +136,7 @@ claude:status                      sonde l'installation Claude Code de l'agent
 claude Explique-moi ce repo        envoie un tour à Claude Code
 open                               ouvre une session PowerShell
 git status                         exécuté dans la session PowerShell
+claude:on                          mode Claude : tout part à Claude, !<cmd> pour PowerShell
 ```
 
 Voir :
