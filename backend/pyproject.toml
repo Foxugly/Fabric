@@ -24,6 +24,10 @@ dependencies = [
   "redis>=5.0,<9.0",
   "psycopg[binary]>=3.2,<4.0",
   "sentry-sdk[django]>=2.0,<3.0",
+  # TOTP secrets are encrypted at rest (Fernet, key derived with HKDF).
+  "cryptography>=50.0,<51.0",
+  # QR code of the TOTP enrolment, rendered server-side as SVG (pure Python).
+  "segno>=1.6.6,<2.0",
 ]
 
 [project.optional-dependencies]

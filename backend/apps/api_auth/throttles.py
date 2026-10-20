@@ -49,3 +49,34 @@ class AccountDeleteRateThrottle(UserRateThrottle):
 
 class WebSocketTicketRateThrottle(UserRateThrottle):
     scope = "ws_ticket"
+
+
+class MfaRateThrottle(AnonRateThrottle):
+    """MFA code checks per client IP (same `NUM_PROXIES` keying as login)."""
+
+    scope = "mfa"
+
+
+class MfaUserRateThrottle(SimpleRateThrottle):
+    """MFA code checks per account: the user the `mfa_token` names.
+
+    A 6-digit code is guessable; bounding the attempts per account, whatever
+    the source IP, keeps a stolen password from being enough.
+    """
+
+    scope = "mfa_user"
+
+    def get_cache_key(self, request: Request, view: Any) -> str | None:
+        from apps.api_auth.mfa import peek_token_user_id
+
+        data = request.data if hasattr(request.data, "get") else {}
+        user_id = peek_token_user_id(str(data.get("mfa_token") or ""))
+        if user_id is None:
+            return None
+        return self.cache_format % {"scope": self.scope, "ident": user_id}
+
+
+class MfaRecoveryCodesRateThrottle(UserRateThrottle):
+    """Per user: regenerating the codes checks the password (an oracle)."""
+
+    scope = "mfa_recovery_codes"

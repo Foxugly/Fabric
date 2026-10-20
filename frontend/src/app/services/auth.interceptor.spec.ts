@@ -29,7 +29,9 @@ describe('authInterceptor', () => {
     httpMock = TestBed.inject(HttpTestingController);
     auth = TestBed.inject(AuthService);
     auth.login('op', 'secret-password').subscribe();
-    httpMock.expectOne('/api/v1/auth/login/').flush({ access: 'old-access', user: USER });
+    httpMock.expectOne('/api/v1/auth/login/').flush({ mfa_required: true, mfa_token: 'mfa' });
+    auth.verifyMfa('123456').subscribe();
+    httpMock.expectOne('/api/v1/auth/mfa/verify/').flush({ access: 'old-access', user: USER });
   });
 
   afterEach(() => {
