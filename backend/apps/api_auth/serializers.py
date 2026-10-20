@@ -7,6 +7,7 @@ from django.contrib.auth import authenticate, get_user_model
 from rest_framework import serializers
 
 from apps.api_auth.models import PushItTarget
+from apps.api_auth.pushit_urls import pushit_url_error
 
 
 class LoginSerializer(serializers.Serializer[dict[str, Any]]):
@@ -76,6 +77,12 @@ class PushItTargetSerializer(serializers.ModelSerializer[PushItTarget]):
                 f"unknown events: {', '.join(sorted(unknown))}"
             )
         return value
+
+    def validate_base_url(self, value: str) -> str:
+        error = pushit_url_error(value)
+        if error is not None:
+            raise serializers.ValidationError(error)
+        return value.strip().rstrip("/")
 
     def validate_app_token(self, value: str) -> str:
         token = value.strip()

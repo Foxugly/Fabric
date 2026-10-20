@@ -27,11 +27,26 @@ from typing import Any
 
 from django.conf import settings
 
+from apps.api_auth.pushit_urls import pushit_url_error
 from apps.commands.models import Command, CommandStatus, PermissionRequest
 
 LOGGER = logging.getLogger(__name__)
 
 SEND_PATH = "/api/v1/notifications/app/send/"
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never follow a redirect: the app token must not travel past the
+    allow-listed host (a 3xx surfaces as an HTTPError instead)."""
+
+    def redirect_request(
+        self, *args: Any, **kwargs: Any
+    ) -> urllib.request.Request | None:
+        return None
+
+
+#: HTTPS only, no redirects: the scheme and host are checked before each send.
+_OPENER = urllib.request.build_opener(_NoRedirect)
 MESSAGE_MAX_CHARS = 300
 
 
@@ -170,7 +185,13 @@ def _post(
     idempotency_key: str,
     event: str,
 ) -> None:
-    url = f"{destination.base_url}{SEND_PATH}"
+    error = pushit_url_error(destination.base_url)
+    if error is not None:
+        # Rows saved before the allow-list existed, or a mistyped site setting:
+        # refuse rather than POST the token somewhere unexpected.
+        LOGGER.warning("PushIT %s not sent: %s", event, error)
+        return
+    url = f"{destination.base_url.rstrip('/')}{SEND_PATH}"
     request = urllib.request.Request(
         url,
         data=payload,
@@ -184,7 +205,7 @@ def _post(
         },
     )
     try:
-        with urllib.request.urlopen(
+        with _OPENER.open(
             request, timeout=getattr(settings, "PUSHIT_TIMEOUT_SECONDS", 5)
         ) as response:
             LOGGER.info("PushIT %s -> HTTP %s", event, response.status)

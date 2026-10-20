@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import threading
-import urllib.request
 from typing import Any
 from unittest.mock import patch
 from uuid import uuid4
@@ -38,6 +37,7 @@ def active(settings: Any) -> None:
     settings.PUSHIT_ENABLED = True
     settings.PUSHIT_APP_TOKEN = TOKEN
     settings.PUSHIT_BASE_URL = "https://pushit-api.example.com"
+    settings.PUSHIT_ALLOWED_HOSTS = ["pushit-api.example.com"]
     settings.PUSHIT_ACTIVE = True
     settings.PUSHIT_TIMEOUT_SECONDS = 5
     settings.PUSHIT_EVENTS = {
@@ -167,7 +167,9 @@ def test_pushit_being_down_never_breaks_the_caller(
     command.status = CommandStatus.SUCCEEDED
     command.save(update_fields=["status"])
 
-    with patch.object(urllib.request, "urlopen", side_effect=OSError("network down")):
+    with patch.object(
+        notifications._OPENER, "open", side_effect=OSError("network down")
+    ):
         notifications.notify_command_finished(command)
         # `_post` runs on a daemon thread; drain it so the failure would surface
         # here if it were ever allowed to propagate.

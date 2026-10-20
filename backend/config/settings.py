@@ -297,6 +297,9 @@ FABRIC_COMMAND_GRACE_SECONDS = int(_env("FABRIC_COMMAND_GRACE_SECONDS", "30"))
 PUSHIT_ENABLED = _env_bool("PUSHIT_ENABLED", False)
 PUSHIT_BASE_URL = _env("PUSHIT_BASE_URL", "https://pushit-api.foxugly.com").rstrip("/")
 PUSHIT_APP_TOKEN = _env("PUSHIT_APP_TOKEN")
+#: The only hosts an app token is ever POSTed to (https only, no redirects):
+#: a target's `base_url` is user input, so anything else is an SSRF (M3).
+PUSHIT_ALLOWED_HOSTS = _env_list("PUSHIT_ALLOWED_HOSTS", "pushit-api.foxugly.com")
 PUSHIT_TIMEOUT_SECONDS = int(_env("PUSHIT_TIMEOUT_SECONDS", "5"))
 
 PUSHIT_DEFAULT_EVENTS = {
