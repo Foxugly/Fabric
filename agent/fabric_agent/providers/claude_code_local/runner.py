@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import sys
-from collections.abc import AsyncGenerator, Callable
+import tempfile
+from collections.abc import AsyncGenerator, Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -18,6 +20,10 @@ from fabric_agent.permissions.gateway import (
 # line can carry a full tool result, which easily exceeds the 64 KiB default
 # limit of `asyncio.StreamReader`.
 STREAM_LINE_LIMIT = 8 * 1024 * 1024
+
+#: Batch launchers run through `cmd.exe`, which re-parses every argument
+#: (`&`, `|`, `%VAR%`): a prompt would escape the approval bridge.
+BATCH_SUFFIXES = frozenset({".bat", ".cmd"})
 
 PERMISSION_MODES = frozenset(
     {"acceptEdits", "auto", "bypassPermissions", "manual", "plan", "default"}
@@ -97,8 +103,18 @@ class StreamDeltaEvent:
 StreamChunk = StreamDeltaEvent | ClaudeCodeExecutionResult
 
 
+def is_batch_launcher(path: Path) -> bool:
+    return path.suffix.lower() in BATCH_SUFFIXES
+
+
 class ClaudeCodeCliRunner:
     def __init__(self, executable_path: Path) -> None:
+        if is_batch_launcher(executable_path):
+            raise ClaudeCodeCliError(
+                f"Refusing to run {executable_path}: .cmd/.bat launchers go through "
+                "cmd.exe, which would interpret the prompt. Point "
+                "FABRIC_CLAUDE_CODE_EXECUTABLE at claude.exe (native installer)."
+            )
         self._executable_path = executable_path
 
     async def execute(
@@ -107,18 +123,21 @@ class ClaudeCodeCliRunner:
         *,
         on_start: ProcessObserver | None = None,
     ) -> ClaudeCodeExecutionResult:
-        process = await self._spawn(self._build_json_command(request), request)
-        if on_start is not None:
-            on_start(process)
-
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=request.timeout_seconds,
+        with _mcp_config_file(request.permission_prompt) as mcp_config:
+            process = await self._spawn(
+                self._build_json_command(request, mcp_config), request
             )
-        except TimeoutError as exc:
-            await _terminate(process)
-            raise ClaudeCodeCliError("Claude Code CLI timed out") from exc
+            if on_start is not None:
+                on_start(process)
+
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=request.timeout_seconds,
+                )
+            except TimeoutError as exc:
+                await _terminate(process)
+                raise ClaudeCodeCliError("Claude Code CLI timed out") from exc
 
         if process.returncode != 0:
             raise ClaudeCodeCliError(
@@ -143,7 +162,24 @@ class ClaudeCodeCliRunner:
         on_start: ProcessObserver | None = None,
     ) -> AsyncGenerator[StreamChunk, None]:
         """Yield deltas as the CLI produces them, then the final result."""
-        process = await self._spawn(self._build_stream_command(request), request)
+        with _mcp_config_file(request.permission_prompt) as mcp_config:
+            # `aclosing` kills the CLI before the config file is removed, even
+            # when the consumer stops early.
+            async with contextlib.aclosing(
+                self._stream(request, mcp_config, on_start)
+            ) as chunks:
+                async for chunk in chunks:
+                    yield chunk
+
+    async def _stream(
+        self,
+        request: ClaudeCodeExecutionRequest,
+        mcp_config: Path | None,
+        on_start: ProcessObserver | None,
+    ) -> AsyncGenerator[StreamChunk, None]:
+        process = await self._spawn(
+            self._build_stream_command(request, mcp_config), request
+        )
         if on_start is not None:
             on_start(process)
 
@@ -224,18 +260,26 @@ class ClaudeCodeCliRunner:
             ),
         )
 
-    def _build_json_command(self, request: ClaudeCodeExecutionRequest) -> list[str]:
+    def _build_json_command(
+        self,
+        request: ClaudeCodeExecutionRequest,
+        mcp_config: Path | None = None,
+    ) -> list[str]:
         args = [
             str(self._executable_path),
             "-p",
             "--output-format",
             "json",
         ]
-        args.extend(self._build_session_args(request))
-        args.append(request.prompt)
+        args.extend(self._build_session_args(request, mcp_config))
+        args.extend(_prompt_args(request.prompt))
         return args
 
-    def _build_stream_command(self, request: ClaudeCodeExecutionRequest) -> list[str]:
+    def _build_stream_command(
+        self,
+        request: ClaudeCodeExecutionRequest,
+        mcp_config: Path | None = None,
+    ) -> list[str]:
         args = [
             str(self._executable_path),
             "-p",
@@ -244,11 +288,15 @@ class ClaudeCodeCliRunner:
             "--verbose",
             "--include-partial-messages",
         ]
-        args.extend(self._build_session_args(request))
-        args.append(request.prompt)
+        args.extend(self._build_session_args(request, mcp_config))
+        args.extend(_prompt_args(request.prompt))
         return args
 
-    def _build_session_args(self, request: ClaudeCodeExecutionRequest) -> list[str]:
+    def _build_session_args(
+        self,
+        request: ClaudeCodeExecutionRequest,
+        mcp_config: Path | None = None,
+    ) -> list[str]:
         args: list[str] = []
         if request.session_id:
             args.extend(["--resume", request.session_id])
@@ -260,18 +308,44 @@ class ClaudeCodeCliRunner:
             args.extend(["--allowed-tools", *request.allowed_tools])
         if request.disallowed_tools:
             args.extend(["--disallowed-tools", *request.disallowed_tools])
-        if request.permission_prompt is not None:
+        if request.permission_prompt is not None and mcp_config is not None:
             # Routes every approval to the Fabric UI instead of denying it
-            # outright, which is what `-p` does without a prompt tool.
+            # outright, which is what `-p` does without a prompt tool. The config
+            # is a file path: inline JSON would put the gateway token in argv,
+            # readable by any process on the machine.
             args.extend(
                 [
                     "--mcp-config",
-                    request.permission_prompt.mcp_config(),
+                    str(mcp_config),
                     "--permission-prompt-tool",
                     PERMISSION_PROMPT_TOOL,
                 ]
             )
         return args
+
+
+def _prompt_args(prompt: str) -> list[str]:
+    """`--` ends option parsing: a prompt starting with `-` stays a prompt."""
+    return ["--", prompt]
+
+
+@contextlib.contextmanager
+def _mcp_config_file(prompt: PermissionPrompt | None) -> Iterator[Path | None]:
+    """A user-private temporary MCP config, removed once the CLI is done."""
+    if prompt is None:
+        yield None
+        return
+    # mkstemp creates the file 0600 on POSIX; on Windows it lands in the
+    # per-user %TEMP%, which only that user (and admins) can read.
+    fd, raw_path = tempfile.mkstemp(prefix="fabric-mcp-", suffix=".json")
+    path = Path(raw_path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(prompt.mcp_config())
+        yield path
+    finally:
+        with contextlib.suppress(OSError):
+            path.unlink()
 
 
 async def _read_line(reader: asyncio.StreamReader, deadline: float) -> bytes | None:

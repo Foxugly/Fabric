@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from fabric_agent.providers.claude_code_local import detector as detector_module
 from fabric_agent.providers.claude_code_local.detector import (
     ClaudeCodeInstallation,
     ClaudeCodeInstallationProbe,
@@ -117,3 +118,35 @@ async def test_provider_uses_detector_status(tmp_path: Path) -> None:
 
     assert status["provider"] == "claude_code_local"
     assert status["details"]["latest_transcript_path"] == str(transcript_path)
+
+
+def test_probe_prefers_the_native_exe_over_an_npm_cmd_launcher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    found = {
+        "claude": "C:/npm/claude.cmd",
+        "claude.exe": "C:/Users/me/.local/bin/claude.exe",
+    }
+    monkeypatch.setattr(
+        "fabric_agent.providers.claude_code_local.detector.shutil.which", found.get
+    )
+    monkeypatch.setattr(detector_module, "_read_claude_version", lambda path: "2.1")
+
+    installation = ClaudeCodeInstallationProbe("claude").probe()
+
+    assert installation.executable_path == Path("C:/Users/me/.local/bin/claude.exe")
+    assert installation.problem is None
+
+
+def test_probe_refuses_a_cmd_launcher_without_a_native_exe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    found = {"claude": "C:/npm/claude.cmd"}
+    monkeypatch.setattr(
+        "fabric_agent.providers.claude_code_local.detector.shutil.which", found.get
+    )
+
+    installation = ClaudeCodeInstallationProbe("claude").probe()
+
+    assert installation.executable_path is None
+    assert installation.problem is not None and "cmd.exe" in installation.problem

@@ -129,7 +129,12 @@ async def test_broker_and_gateway_agree_end_to_end(
         assert published[0].command_id == "cmd-42"
         assert published[0].tool_name == "Edit"
 
-        gateway.resolve(published[0].request_id, PermissionDecision(allowed=True))
+        gateway.resolve(
+            published[0].request_id,
+            PermissionDecision(allowed=True),
+            command_id="cmd-42",
+            fingerprint=published[0].fingerprint,
+        )
         await asyncio.to_thread(thread.join, 10)
         assert not thread.is_alive()
     finally:
