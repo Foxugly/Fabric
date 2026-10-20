@@ -21,6 +21,7 @@ import { AuthService } from './services/auth.service';
 import { CommandService } from './services/command.service';
 import { EventStreamService } from './services/event-stream.service';
 import { RuntimeErrorService } from './services/runtime-error.service';
+import { routeTerminalLine } from './terminal-routing';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { LanguageSwitcherComponent } from './i18n/language-switcher.component';
 
@@ -524,6 +525,8 @@ export class AppComponent implements OnDestroy {
   readonly loginError = signal('');
   readonly claudeSessionId = signal<string | null>(null);
   readonly claudePermissionMode = signal(DEFAULT_CLAUDE_PERMISSION_MODE);
+  /** `claude:on`: every line goes to Claude without the `claude` prefix. */
+  readonly claudeMode = signal(false);
   readonly pendingPermission = signal<PendingPermission | null>(null);
   readonly decidingPermission = signal(false);
   readonly showNotifications = signal(false);
@@ -561,6 +564,7 @@ export class AppComponent implements OnDestroy {
           this.selectedAgent.set(null);
           this.powerShellSessionId.set(null);
           this.claudeSessionId.set(null);
+          this.claudeMode.set(false);
           this.activeCommandId.set(null);
           this.showNotifications.set(false);
           this.agents.set([]);
@@ -654,7 +658,7 @@ export class AppComponent implements OnDestroy {
       `Agent: ${this.selectedAgent()?.name ?? 'none'}`,
       `PowerShell session: ${this.powerShellSessionId() === null ? 'closed' : this.promptPath()}`,
       `Local commands: ${commands.join(', ')}`,
-      'Claude Code: claude <prompt> · claude:status · claude:new · claude:mode <mode>',
+      'Claude Code: claude <prompt> · claude:on / claude:off · claude:status · claude:new · claude:mode <mode>',
       'Ctrl+C cancels the active remote command.',
     ].join('\n');
   }
@@ -663,7 +667,9 @@ export class AppComponent implements OnDestroy {
     if (this.pendingPermission() !== null) {
       return 'allow / deny ?';
     }
-    const target = this.powerShellSessionId() === null ? 'closed' : this.promptPath();
+    const target = this.claudeMode()
+      ? 'claude'
+      : this.powerShellSessionId() === null ? 'closed' : this.promptPath();
     const claudeMarker = this.claudeSessionId() === null ? '' : ':claude';
     if (this.activeCommandId() !== null) {
       return `fabric[${target}${claudeMarker}:running] $`;
@@ -931,12 +937,15 @@ export class AppComponent implements OnDestroy {
       return;
     }
 
-    if (await this.handleClaudeTerminalCommand(trimmed)) {
-      return;
-    }
+    const routed = routeTerminalLine(trimmed, this.claudeMode());
+    if (!routed.powerShell) {
+      if (await this.handleClaudeTerminalCommand(routed.line)) {
+        return;
+      }
 
-    if (await this.handleLocalTerminalCommand(trimmed)) {
-      return;
+      if (await this.handleLocalTerminalCommand(routed.line)) {
+        return;
+      }
     }
 
     const sessionId = this.powerShellSessionId();
@@ -948,7 +957,7 @@ export class AppComponent implements OnDestroy {
     await this.startStreamingCommand(
       POWERSHELL_PROVIDER,
       'windows_powershell.command.run',
-      { session_id: sessionId, command: trimmed },
+      { session_id: sessionId, command: routed.line },
       60,
       'PowerShell command failed',
     );
@@ -963,6 +972,16 @@ export class AppComponent implements OnDestroy {
 
     const subcommand = (match[1] ?? '').slice(1).toLowerCase();
     const argument = (match[2] ?? '').trim();
+
+    if (subcommand === 'on' || subcommand === 'off') {
+      this.claudeMode.set(subcommand === 'on');
+      this.terminalService.sendResponse(
+        subcommand === 'on'
+          ? 'Claude mode on: every line goes to Claude. !<command> runs PowerShell, claude:off to leave.'
+          : 'Claude mode off: lines go to PowerShell again.',
+      );
+      return true;
+    }
 
     if (subcommand === 'new') {
       this.claudeSessionId.set(null);
@@ -989,7 +1008,7 @@ export class AppComponent implements OnDestroy {
 
     if (subcommand !== '') {
       this.terminalService.sendResponse(
-        'Unknown claude subcommand. Use claude:status, claude:new or claude:mode <mode>.',
+        'Unknown claude subcommand. Use claude:on, claude:off, claude:status, claude:new or claude:mode <mode>.',
       );
       return true;
     }
@@ -1286,12 +1305,15 @@ export class AppComponent implements OnDestroy {
         '  claude:status     - probe the local Claude Code installation',
         '  claude:new        - start a new Claude session on the next prompt',
         '  claude:mode <m>   - permission mode (default, acceptEdits, plan, …)',
+        '  claude:on         - Claude mode: every line goes to Claude, no prefix',
+        '  claude:off        - back to PowerShell',
+        '  !<command>        - in Claude mode, run one PowerShell command',
         '',
         'When Claude asks for permission:',
         '  allow             - run the tool call',
         '  deny [reason]     - refuse it and tell Claude why',
         '',
-        'Anything else is executed in the PowerShell session.',
+        'Anything else is executed in the PowerShell session (sent to Claude in Claude mode).',
       ].join('\n'));
       return true;
     }
@@ -1485,6 +1507,9 @@ export class AppComponent implements OnDestroy {
       ) {
         this.claudePermissionMode.set(parsed['claudePermissionMode']);
       }
+      if (parsed['claudeMode'] === true) {
+        this.claudeMode.set(true);
+      }
     } catch {
       this.clearTerminalState();
     }
@@ -1505,6 +1530,7 @@ export class AppComponent implements OnDestroy {
           workingDirectory: this.workingDirectory(),
           claudeSessionId: this.claudeSessionId(),
           claudePermissionMode: this.claudePermissionMode(),
+          claudeMode: this.claudeMode(),
         }),
       );
     } catch {
