@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, cast
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -12,6 +13,7 @@ from channels.testing.websocket import WebsocketCommunicator
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 from shared.protocol import build_message
+from ws_helpers import agent_headers
 
 from apps.agents.models import Agent
 from apps.commands.models import (
@@ -47,7 +49,8 @@ async def test_permission_request_blocks_then_resumes_the_command() -> None:
 
     communicator = WebsocketCommunicator(
         application,
-        f"/ws/v1/agent/?agent_id={agent.id}&token={token}",
+        "/ws/v1/agent/",
+        headers=agent_headers(token),
     )
     connected, _ = await communicator.connect()
     assert connected is True
@@ -148,7 +151,8 @@ async def test_denying_relays_the_reason_to_the_agent() -> None:
 
     communicator = WebsocketCommunicator(
         application,
-        f"/ws/v1/agent/?agent_id={agent.id}&token={token}",
+        "/ws/v1/agent/",
+        headers=agent_headers(token),
     )
     connected, _ = await communicator.connect()
     assert connected is True
@@ -256,3 +260,161 @@ def test_another_user_cannot_answer_your_permission_request() -> None:
     assert response.status_code == 404
     request.refresh_from_db()
     assert request.decision == PermissionDecision.PENDING
+
+
+def _waiting_request(username: str) -> tuple[Any, Command, PermissionRequest]:
+    user = get_user_model().objects.create_user(username=username, password="pw")
+    agent = Agent.objects.create(name=f"{username}-agent", owner=user)
+    command = Command.objects.create(
+        requested_by=user,
+        agent=agent,
+        provider="claude_code_local",
+        action="claude_code_local.message.send",
+        payload={"text": "hi"},
+        status=CommandStatus.WAITING_USER_ACTION,
+    )
+    request = PermissionRequest.objects.create(
+        command=command,
+        request_id=uuid4(),
+        tool_name="Bash",
+        tool_input={"command": "git push"},
+        fingerprint="ab" * 32,
+    )
+    return user, command, request
+
+
+@pytest.mark.django_db
+def test_only_one_of_two_decisions_wins() -> None:
+    """M2: the second decision gets 409 and nothing is relayed for it.
+
+    The view has no read-then-write check any more: the conditional UPDATE is
+    the gate, so a second POST that read the row before the first one committed
+    takes exactly this path.
+    """
+    user, command, request = _waiting_request("race-user")
+    client = APIClient()
+    client.force_authenticate(user=user)
+    url = f"/api/v1/commands/{command.id}/permissions/{request.request_id}/"
+
+    with patch("apps.commands.views.dispatch_permission_decision") as dispatched:
+        first = client.post(url, {"behavior": "deny"}, format="json")
+        second = client.post(url, {"behavior": "allow"}, format="json")
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["detail"] == "Already denied."
+    dispatched.assert_called_once()
+    request.refresh_from_db()
+    assert request.decision == PermissionDecision.DENIED
+
+
+@pytest.mark.django_db
+def test_a_stale_pending_read_cannot_overwrite_a_decision() -> None:
+    """The decision made between the read and the write is never overwritten."""
+    user, command, request = _waiting_request("stale-user")
+    client = APIClient()
+    client.force_authenticate(user=user)
+    original_filter = PermissionRequest.objects.filter
+
+    def decide_concurrently(*args: Any, **kwargs: Any) -> Any:
+        # Another worker commits its decision just before ours runs.
+        if kwargs.get("decision") == PermissionDecision.PENDING:
+            original_filter(pk=request.pk).update(
+                decision=PermissionDecision.ALLOWED
+            )
+        return original_filter(*args, **kwargs)
+
+    with (
+        patch.object(PermissionRequest.objects, "filter", decide_concurrently),
+        patch("apps.commands.views.dispatch_permission_decision") as dispatched,
+    ):
+        response = client.post(
+            f"/api/v1/commands/{command.id}/permissions/{request.request_id}/",
+            {"behavior": "deny"},
+            format="json",
+        )
+
+    assert response.status_code == 409
+    dispatched.assert_not_called()
+    request.refresh_from_db()
+    assert request.decision == PermissionDecision.ALLOWED
+
+
+@pytest.mark.django_db
+def test_the_decision_echoes_the_request_fingerprint() -> None:
+    """A-M5: the agent only honours a decision bound to its exact request."""
+    user, command, request = _waiting_request("fp-user")
+    client = APIClient()
+    client.force_authenticate(user=user)
+
+    with patch("apps.agents.services.async_to_sync") as to_sync:
+        response = client.post(
+            f"/api/v1/commands/{command.id}/permissions/{request.request_id}/",
+            {"behavior": "allow"},
+            format="json",
+        )
+
+    assert response.status_code == 200
+    _group, event = to_sync.return_value.call_args[0]
+    assert event["type"] == "session.action_response"
+    assert event["message"]["payload"]["fingerprint"] == "ab" * 32
+    assert event["message"]["payload"]["request_id"] == str(request.request_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_the_agent_fingerprint_is_stored_with_the_request() -> None:
+    user = await get_user_model().objects.acreate_user(
+        username="fp-agent-user", password="pw"
+    )
+    agent = await Agent.objects.acreate(name="fp-agent", owner=user)
+    token = await sync_to_async(agent.issue_development_token)()
+    command = await Command.objects.acreate(
+        requested_by=user,
+        agent=agent,
+        provider="claude_code_local",
+        action="claude_code_local.message.send",
+        payload={"text": "hi"},
+        status=CommandStatus.RUNNING,
+    )
+    communicator = WebsocketCommunicator(
+        application, "/ws/v1/agent/", headers=agent_headers(token)
+    )
+    connected, _ = await communicator.connect()
+    assert connected is True
+    await communicator.receive_json_from()
+    # Takeover failed the in-flight command: put it back where the test needs it.
+    await Command.objects.filter(id=command.id).aupdate(status=CommandStatus.RUNNING)
+
+    fingerprints = {str(uuid4()): "cd" * 32, str(uuid4()): "not-a-sha256"}
+    stored: dict[str, str] = {}
+    for request_id, fingerprint in fingerprints.items():
+        await communicator.send_json_to(
+            build_message(
+                message_type="session.action_required",
+                payload={
+                    "command_id": str(command.id),
+                    "request_id": request_id,
+                    "tool_name": "Bash",
+                    "input": {"command": "ls"},
+                    "fingerprint": fingerprint,
+                },
+            )
+        )
+        for _ in range(40):
+            row = await PermissionRequest.objects.filter(
+                request_id=request_id
+            ).afirst()
+            if row is not None:
+                stored[request_id] = row.fingerprint
+                break
+            await asyncio.sleep(0.05)
+        # Answered: the turn resumes and may ask again.
+        await Command.objects.filter(id=command.id).aupdate(
+            status=CommandStatus.RUNNING
+        )
+
+    first, second = fingerprints
+    assert stored[first] == "cd" * 32
+    assert stored[second] == ""
+    await communicator.disconnect()

@@ -131,8 +131,8 @@ export interface FabricUser {
   is_superuser: boolean;
 }
 
+/** The signed-in user. The access token lives in AuthService's memory only. */
 export interface AuthSession {
-  token: string;
   user: FabricUser;
 }
 

@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from django.db.models import F, TextField, Value
+from django.db.models.functions import Concat
 from django.utils import timezone
 
 from apps.commands.models import Command
-from apps.conversations.models import Message, MessageRole, MessageStatus
+from apps.conversations.models import (
+    Conversation,
+    Message,
+    MessageRole,
+    MessageStatus,
+)
 
 
 def sync_message_for_command_started(command: Command) -> None:
@@ -15,13 +22,17 @@ def sync_message_for_command_started(command: Command) -> None:
 
 
 def sync_message_for_command_progress(command: Command, delta: str) -> None:
-    if not hasattr(command, "assistant_message"):
-        return
-    message = command.assistant_message
-    message.status = MessageStatus.RUNNING
-    message.content = f"{message.content}{delta}"
-    message.save(update_fields=["status", "content", "updated_at"])
-    _touch_conversation(message)
+    """Append in SQL: rewriting the whole content per delta was O(n²) (M1)."""
+    now = timezone.now()
+    updated = Message.objects.filter(command_id=command.id).update(
+        status=MessageStatus.RUNNING,
+        content=Concat(F("content"), Value(delta), output_field=TextField()),
+        updated_at=now,
+    )
+    if updated:
+        Conversation.objects.filter(messages__command_id=command.id).update(
+            last_accessed_at=now, updated_at=now
+        )
 
 
 def sync_message_for_command_completed(command: Command) -> None:

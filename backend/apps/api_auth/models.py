@@ -86,3 +86,28 @@ class PushItTarget(models.Model):
 
     def wants(self, event: str) -> bool:
         return self.enabled and self.event_policy().get(event, False)
+
+
+class WebSocketTicket(models.Model):
+    """Single-use, short-lived credential that opens the browser event socket.
+
+    Browsers cannot set headers on a WebSocket handshake, so the credential has
+    to travel in the URL — where nginx access logs keep it. A ticket logged
+    there is worthless: it is consumed by the first handshake and expires after
+    `FABRIC_WS_TICKET_TTL_SECONDS` (≤ 30 s) anyway. Only its SHA-256 is stored.
+    """
+
+    key_hash = models.CharField(max_length=64, unique=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="websocket_tickets",
+    )
+    expires_at = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "websocket_tickets"
+
+    def __str__(self) -> str:
+        return f"ticket for {self.user_id} until {self.expires_at.isoformat()}"

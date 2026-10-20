@@ -53,18 +53,24 @@ Implémenté et vérifié de bout en bout :
 
 > **Sécurité — à lire avant toute exposition.** Un agent donne l'exécution de
 > code arbitraire sur la machine où il tourne. Chaque agent appartient à un
-> utilisateur : lui seul (et les comptes `is_staff`) peut le voir, le piloter et
-> émettre ses tokens. Conséquences concrètes :
+> utilisateur : lui seul peut le voir, le piloter et émettre ses tokens — staff
+> et superusers compris. Conséquences concrètes :
 >
-> - ne donner `--staff` qu'à soi-même : un compte staff voit **tous** les agents ;
+> - l'opérateur de prod est un utilisateur normal ; `/admin/` n'est pas exposé ;
 > - servir Fabric en HTTPS et définir `SECRET_KEY` (obligatoire dès que `DEBUG`
 >   est faux, tout comme `REDIS_URL`) ;
-> - faire tourner l'agent sous un compte Windows non administrateur ;
+> - faire tourner l'agent sous un compte Windows non administrateur, par une
+>   tâche planifiée à l'ouverture de session et non en service `LocalSystem` ;
+> - les garde-fous sont décidés **sur le PC** par
+>   `%APPDATA%\fabric-agent\policy.toml` ([agent/README.md](agent/README.md)) :
+>   par défaut, PowerShell brut, `network.recover`, `bypassPermissions`,
+>   `acceptEdits` et la désactivation du pont d'approbation sont refusés, quoi
+>   que demande le serveur ;
 > - Claude demande une autorisation avant chaque outil et la question remonte
 >   dans le terminal (`allow` / `deny [raison]`) — voir
 >   [docs/permission-bridge.md](docs/permission-bridge.md).
->   `claude:mode acceptEdits` supprime ces demandes : à n'utiliser qu'en
->   connaissance de cause.
+>   `claude:mode acceptEdits` supprime ces demandes. L'agent le refuse tant
+>   que la politique locale ne l'autorise pas.
 >
 > Détail complet : [docs/audit-2026-07-29.md](docs/audit-2026-07-29.md).
 

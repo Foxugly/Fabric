@@ -8,6 +8,7 @@ from asgiref.sync import sync_to_async
 from channels.testing.websocket import WebsocketCommunicator
 from rest_framework.test import APIClient
 from shared.protocol import build_message
+from ws_helpers import agent_headers, events_path
 
 from apps.agents.models import Agent
 from apps.agents.services import dispatch_command
@@ -43,8 +44,9 @@ def test_command_status_transitions() -> None:
 @pytest.mark.django_db
 def test_claude_code_local_command_is_accepted_by_api(
     authenticated_api_client: APIClient,
+    api_user: Any,
 ) -> None:
-    agent = Agent.objects.create(name="agent")
+    agent = Agent.objects.create(name="agent", owner=api_user)
 
     response = authenticated_api_client.post(
         "/api/v1/commands/",
@@ -65,8 +67,9 @@ def test_claude_code_local_command_is_accepted_by_api(
 @pytest.mark.django_db
 def test_invalid_action_for_provider_is_rejected(
     authenticated_api_client: APIClient,
+    api_user: Any,
 ) -> None:
-    agent = Agent.objects.create(name="agent")
+    agent = Agent.objects.create(name="agent", owner=api_user)
 
     response = authenticated_api_client.post(
         "/api/v1/commands/",
@@ -86,8 +89,9 @@ def test_invalid_action_for_provider_is_rejected(
 @pytest.mark.django_db
 def test_windows_powershell_command_is_accepted_by_api(
     authenticated_api_client: APIClient,
+    api_user: Any,
 ) -> None:
-    agent = Agent.objects.create(name="agent")
+    agent = Agent.objects.create(name="agent", owner=api_user)
 
     response = authenticated_api_client.post(
         "/api/v1/commands/",
@@ -108,8 +112,9 @@ def test_windows_powershell_command_is_accepted_by_api(
 @pytest.mark.django_db
 def test_windows_powershell_persistent_session_command_is_accepted_by_api(
     authenticated_api_client: APIClient,
+    api_user: Any,
 ) -> None:
-    agent = Agent.objects.create(name="agent")
+    agent = Agent.objects.create(name="agent", owner=api_user)
 
     response = authenticated_api_client.post(
         "/api/v1/commands/",
@@ -129,8 +134,9 @@ def test_windows_powershell_persistent_session_command_is_accepted_by_api(
 @pytest.mark.django_db
 def test_windows_powershell_terminal_command_is_accepted_by_api(
     authenticated_api_client: APIClient,
+    api_user: Any,
 ) -> None:
-    agent = Agent.objects.create(name="agent")
+    agent = Agent.objects.create(name="agent", owner=api_user)
 
     response = authenticated_api_client.post(
         "/api/v1/commands/",
@@ -173,7 +179,8 @@ async def test_command_request_can_complete_with_progress() -> None:
     token = await sync_to_async(agent.issue_development_token)()
     communicator = WebsocketCommunicator(
         application,
-        f"/ws/v1/agent/?agent_id={agent.id}&token={token}",
+        "/ws/v1/agent/",
+        headers=agent_headers(token),
     )
     connected, _ = await communicator.connect()
     assert connected is True
@@ -270,7 +277,8 @@ async def test_claude_code_local_status_command_can_complete_without_progress() 
     token = await sync_to_async(agent.issue_development_token)()
     communicator = WebsocketCommunicator(
         application,
-        f"/ws/v1/agent/?agent_id={agent.id}&token={token}",
+        "/ws/v1/agent/",
+        headers=agent_headers(token),
     )
     connected, _ = await communicator.connect()
     assert connected is True
@@ -367,7 +375,8 @@ async def test_command_failed_message_marks_command_failed() -> None:
     token = await sync_to_async(agent.issue_development_token)()
     communicator = WebsocketCommunicator(
         application,
-        f"/ws/v1/agent/?agent_id={agent.id}&token={token}",
+        "/ws/v1/agent/",
+        headers=agent_headers(token),
     )
     connected, _ = await communicator.connect()
     assert connected is True
@@ -442,7 +451,6 @@ async def test_command_failed_message_marks_command_failed() -> None:
 async def test_frontend_events_socket_receives_command_updates_and_progress() -> None:
     agent = await Agent.objects.acreate(name="agent")
     from django.contrib.auth import get_user_model
-    from rest_framework.authtoken.models import Token
 
     user_model = get_user_model()
     user = await user_model.objects.acreate_user(
@@ -450,12 +458,11 @@ async def test_frontend_events_socket_receives_command_updates_and_progress() ->
         password="commands-password",
     )
     await Agent.objects.filter(id=agent.id).aupdate(owner=user)
-    user_token = await Token.objects.acreate(user=user)
 
     token = await sync_to_async(agent.issue_development_token)()
     event_communicator = WebsocketCommunicator(
         application,
-        f"/ws/v1/events/?token={user_token.key}",
+        await events_path(user),
         # The browser event socket is origin-checked (config/routing.py).
         headers=[(b"origin", b"http://127.0.0.1:4200")],
     )
@@ -464,7 +471,8 @@ async def test_frontend_events_socket_receives_command_updates_and_progress() ->
 
     communicator = WebsocketCommunicator(
         application,
-        f"/ws/v1/agent/?agent_id={agent.id}&token={token}",
+        "/ws/v1/agent/",
+        headers=agent_headers(token),
     )
     connected, _ = await communicator.connect()
     assert connected is True
@@ -568,7 +576,8 @@ async def test_cancel_running_command_marks_it_cancelled() -> None:
     token = await sync_to_async(agent.issue_development_token)()
     communicator = WebsocketCommunicator(
         application,
-        f"/ws/v1/agent/?agent_id={agent.id}&token={token}",
+        "/ws/v1/agent/",
+        headers=agent_headers(token),
     )
     connected, _ = await communicator.connect()
     assert connected is True
@@ -663,7 +672,8 @@ async def test_agent_disconnect_fails_in_flight_commands() -> None:
     token = await sync_to_async(agent.issue_development_token)()
     communicator = WebsocketCommunicator(
         application,
-        f"/ws/v1/agent/?agent_id={agent.id}&token={token}",
+        "/ws/v1/agent/",
+        headers=agent_headers(token),
     )
     connected, _ = await communicator.connect()
     assert connected is True

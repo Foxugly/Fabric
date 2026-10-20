@@ -41,7 +41,12 @@ async def test_gateway_relays_an_allow_decision() -> None:
 
         assert len(published) == 1
         assert published[0].tool_name == "Bash"
-        assert gateway.resolve("req-1", PermissionDecision(allowed=True)) is True
+        assert (
+            gateway.resolve(
+                "req-1", PermissionDecision(allowed=True), command_id="cmd-1"
+            )
+            is True
+        )
 
         response = await asyncio.wait_for(asking, timeout=5)
     finally:
@@ -60,7 +65,11 @@ async def test_gateway_relays_a_deny_decision_with_a_reason() -> None:
     try:
         asking = asyncio.create_task(_ask(gateway))
         await asyncio.sleep(0.05)
-        gateway.resolve("req-1", PermissionDecision(allowed=False, message="not now"))
+        gateway.resolve(
+            "req-1",
+            PermissionDecision(allowed=False, message="not now"),
+            command_id="cmd-1",
+        )
         response = await asyncio.wait_for(asking, timeout=5)
     finally:
         await gateway.stop()
@@ -132,6 +141,72 @@ async def test_no_handler_means_no_silent_approval() -> None:
         await gateway.stop()
 
     assert response["behavior"] == "deny"
+
+
+@pytest.mark.asyncio
+async def test_an_approval_for_another_command_is_ignored() -> None:
+    published: list[PermissionRequest] = []
+    gateway = PermissionGateway(handler=_recorder(published))
+    await gateway.start()
+    try:
+        asking = asyncio.create_task(_ask(gateway))
+        await asyncio.sleep(0.05)
+
+        allow = PermissionDecision(allowed=True)
+        assert gateway.resolve("req-1", allow, command_id="cmd-other") is False
+        assert not asking.done()
+
+        # The genuine answer still lands afterwards.
+        assert gateway.resolve(
+            "req-1",
+            PermissionDecision(allowed=False, message="no"),
+            command_id="cmd-1",
+            fingerprint=published[0].fingerprint,
+        )
+        response = await asyncio.wait_for(asking, timeout=5)
+    finally:
+        await gateway.stop()
+
+    assert response == {"behavior": "deny", "message": "no"}
+
+
+@pytest.mark.asyncio
+async def test_an_approval_with_a_foreign_fingerprint_is_ignored() -> None:
+    published: list[PermissionRequest] = []
+    gateway = PermissionGateway(handler=_recorder(published))
+    await gateway.start()
+    try:
+        asking = asyncio.create_task(_ask(gateway))
+        await asyncio.sleep(0.05)
+        forged = PermissionRequest(
+            request_id="req-1",
+            command_id="cmd-1",
+            tool_name="Bash",
+            tool_input={"command": "rm -rf /"},
+        ).fingerprint
+        assert forged != published[0].fingerprint
+        assert published[0].to_payload()["fingerprint"] == published[0].fingerprint
+
+        allow = PermissionDecision(allowed=True)
+        assert not gateway.resolve(
+            "req-1", allow, command_id="cmd-1", fingerprint=forged
+        )
+        # A policy requiring fingerprints refuses an answer without one.
+        assert not gateway.resolve(
+            "req-1", allow, command_id="cmd-1", require_fingerprint=True
+        )
+        assert gateway.resolve(
+            "req-1",
+            allow,
+            command_id="cmd-1",
+            fingerprint=published[0].fingerprint,
+            require_fingerprint=True,
+        )
+        response = await asyncio.wait_for(asking, timeout=5)
+    finally:
+        await gateway.stop()
+
+    assert response == {"behavior": "allow", "updatedInput": {"command": "git status"}}
 
 
 def _recorder(published: list[PermissionRequest]):  # type: ignore[no-untyped-def]

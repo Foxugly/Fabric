@@ -3,28 +3,18 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import parse_qs
 
-from rest_framework.authtoken.models import Token
-
-from apps.api_auth.authentication import is_token_expired
+from apps.api_auth.tickets import consume_ticket
 
 
 def authenticate_events_user(query_string: bytes) -> Any | None:
+    """Authenticate the browser event socket with a single-use ticket.
+
+    The SPA obtains the ticket from `POST /api/v1/auth/ws-ticket/` with its
+    in-memory access token, then opens `/ws/v1/events/?ticket=…`. Long-lived
+    credentials never appear in the URL.
+    """
     params = parse_qs(query_string.decode("utf-8"))
-    token_value = params.get("token", [""])[0]
-    if not token_value:
+    tickets = params.get("ticket", [])
+    if len(tickets) != 1:
         return None
-
-    try:
-        token = Token.objects.select_related("user").get(key=token_value)
-    except Token.DoesNotExist:
-        return None
-
-    # The socket outlives the HTTP request that opened it, so the expiry has to
-    # be checked here too — otherwise a stale token still gets a live feed.
-    if is_token_expired(token):
-        token.delete()
-        return None
-
-    if not token.user.is_active:
-        return None
-    return token.user
+    return consume_ticket(tickets[0])

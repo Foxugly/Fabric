@@ -7,11 +7,14 @@ from django.contrib.auth import authenticate, get_user_model
 from rest_framework import serializers
 
 from apps.api_auth.models import PushItTarget
+from apps.api_auth.pushit_urls import pushit_url_error
 
 
 class LoginSerializer(serializers.Serializer[dict[str, Any]]):
     username = serializers.CharField(max_length=150)
     password = serializers.CharField(max_length=128, trim_whitespace=False)
+    #: Cookie mode only: a persistent cookie instead of a browser-session one.
+    remember_me = serializers.BooleanField(required=False, default=False)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         request = self.context.get("request")
@@ -24,6 +27,11 @@ class LoginSerializer(serializers.Serializer[dict[str, Any]]):
             raise serializers.ValidationError("Invalid credentials")
         attrs["user"] = user
         return attrs
+
+
+class PasswordChangeSerializer(serializers.Serializer[dict[str, Any]]):
+    current_password = serializers.CharField(max_length=128, trim_whitespace=False)
+    new_password = serializers.CharField(max_length=128, trim_whitespace=False)
 
 
 class UserSerializer(serializers.ModelSerializer[Any]):
@@ -69,6 +77,12 @@ class PushItTargetSerializer(serializers.ModelSerializer[PushItTarget]):
                 f"unknown events: {', '.join(sorted(unknown))}"
             )
         return value
+
+    def validate_base_url(self, value: str) -> str:
+        error = pushit_url_error(value)
+        if error is not None:
+            raise serializers.ValidationError(error)
+        return value.strip().rstrip("/")
 
     def validate_app_token(self, value: str) -> str:
         token = value.strip()

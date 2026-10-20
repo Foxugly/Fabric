@@ -566,6 +566,11 @@ export class AppComponent implements OnDestroy {
           this.agents.set([]);
           this.resetStreamingState();
           this.resumedTerminalState = false;
+          // Typed commands may hold secrets: nothing survives a sign-out
+          // (AuthService.clearSession wipes the stored copies).
+          this.commandHistory = [];
+          this.historyIndex = null;
+          this.historyDraft = '';
           return;
         }
 
@@ -1486,6 +1491,10 @@ export class AppComponent implements OnDestroy {
   }
 
   private persistTerminalState(): void {
+    if (this.session() === null) {
+      this.clearTerminalState();
+      return;
+    }
     try {
       globalThis.localStorage.setItem(
         TERMINAL_STATE_STORAGE_KEY,
@@ -1506,6 +1515,7 @@ export class AppComponent implements OnDestroy {
   private clearTerminalState(): void {
     try {
       globalThis.localStorage.removeItem(TERMINAL_STATE_STORAGE_KEY);
+      globalThis.localStorage.removeItem(TERMINAL_HISTORY_STORAGE_KEY);
     } catch {
       // Ignore storage failures.
     }
@@ -1736,6 +1746,9 @@ export class AppComponent implements OnDestroy {
   }
 
   private persistCommandHistory(): void {
+    if (this.session() === null) {
+      return;
+    }
     try {
       globalThis.localStorage.setItem(
         TERMINAL_HISTORY_STORAGE_KEY,
