@@ -22,7 +22,9 @@
   "login": {
     "username": "Gebruikersnaam",
     "password": "Wachtwoord",
-    "signIn": "Aanmelden"
+    "signIn": "Aanmelden",
+    "showPassword": "Wachtwoord tonen",
+    "hidePassword": "Wachtwoord verbergen"
   },
   "notifications": {
     "title": "Meldingen",

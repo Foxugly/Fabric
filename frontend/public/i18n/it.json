@@ -22,7 +22,9 @@
   "login": {
     "username": "Nome utente",
     "password": "Password",
-    "signIn": "Accedi"
+    "signIn": "Accedi",
+    "showPassword": "Mostra password",
+    "hidePassword": "Nascondi password"
   },
   "notifications": {
     "title": "Notifiche",

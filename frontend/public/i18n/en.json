@@ -22,7 +22,9 @@
   "login": {
     "username": "Username",
     "password": "Password",
-    "signIn": "Sign in"
+    "signIn": "Sign in",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password"
   },
   "notifications": {
     "title": "Notifications",

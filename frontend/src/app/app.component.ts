@@ -190,14 +190,30 @@ interface PendingPermission {
                 autocomplete="username"
                 [placeholder]="'login.username' | transloco"
               />
-              <input
-                type="password"
-                name="password"
-                [ngModel]="loginPassword()"
-                (ngModelChange)="loginPassword.set($event)"
-                autocomplete="current-password"
-                [placeholder]="'login.password' | transloco"
-              />
+              <div class="password-field">
+                <input
+                  [type]="showPassword() ? 'text' : 'password'"
+                  name="password"
+                  [ngModel]="loginPassword()"
+                  (ngModelChange)="loginPassword.set($event)"
+                  autocomplete="current-password"
+                  [placeholder]="'login.password' | transloco"
+                />
+                <button
+                  type="button"
+                  class="password-toggle"
+                  (click)="showPassword.set(!showPassword())"
+                  [attr.aria-pressed]="showPassword()"
+                  [attr.aria-label]="(showPassword() ? 'login.hidePassword' : 'login.showPassword') | transloco"
+                  [title]="(showPassword() ? 'login.hidePassword' : 'login.showPassword') | transloco"
+                >
+                  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+                    <circle cx="12" cy="12" r="3" />
+                    <line *ngIf="showPassword()" x1="3" y1="3" x2="21" y2="21" />
+                  </svg>
+                </button>
+              </div>
               <button type="submit">{{ 'login.signIn' | transloco }}</button>
               <div class="login-error" *ngIf="loginError()">{{ loginError() }}</div>
             </form>
@@ -471,6 +487,36 @@ interface PendingPermission {
       width: 100%;
     }
 
+    .password-field {
+      position: relative;
+    }
+
+    .password-field input {
+      padding-right: 40px;
+      box-sizing: border-box;
+    }
+
+    .login-panel .password-toggle {
+      position: absolute;
+      top: 50%;
+      right: 6px;
+      transform: translateY(-50%);
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      display: grid;
+      place-items: center;
+      background: transparent;
+      border: none;
+      color: #9ca3af;
+      cursor: pointer;
+    }
+
+    .login-panel .password-toggle:hover,
+    .login-panel .password-toggle:focus-visible {
+      color: #e5e7eb;
+    }
+
     .login-error {
       color: #fca5a5;
       font-size: 13px;
@@ -522,6 +568,7 @@ export class AppComponent implements OnDestroy {
   readonly terminalMounted = signal(true);
   readonly loginUsername = signal('');
   readonly loginPassword = signal('');
+  readonly showPassword = signal(false);
   readonly loginError = signal('');
   readonly claudeSessionId = signal<string | null>(null);
   readonly claudePermissionMode = signal(DEFAULT_CLAUDE_PERMISSION_MODE);
@@ -695,6 +742,9 @@ export class AppComponent implements OnDestroy {
     this.loginError.set('');
     this.authService.login(this.loginUsername(), this.loginPassword()).subscribe({
       next: () => {
+        // Don't keep the password in memory (or on screen) once signed in.
+        this.loginPassword.set('');
+        this.showPassword.set(false);
         this.runtimeErrorService.clear();
         this.refreshAll();
       },
