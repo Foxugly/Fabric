@@ -190,9 +190,9 @@ jobs:
           fi
           for projet in backend agent; do
             echo "::group::pip-audit $projet"
-            python -m venv "/tmp/audit-$projet"
+            python -m venv --upgrade-deps "/tmp/audit-$projet"
             "/tmp/audit-$projet/bin/pip" install --quiet -e "./$projet[dev]"
-            pip-audit --progress-spinner off \
+            pip-audit --progress-spinner off --skip-editable \
               --path "/tmp/audit-$projet/lib/python3.12/site-packages" "${ignore[@]}"
             echo "::endgroup::"
           done
