@@ -1,0 +1,23 @@
+[Unit]
+Description=Fabric — daily retention purge (command output, events, tickets, expired JWT)
+After=network.target fabric-env-fetch.service postgresql.service
+# Hard dependency: without the SSM-fetched env (DB credentials), refuse to run.
+Requires=fabric-env-fetch.service
+
+[Service]
+# Started by fabric-purge.timer. Fabric has no Celery: a oneshot management
+# command is the whole job (purge_fabric_history also runs flushexpiredtokens).
+Type=oneshot
+User=django
+Group=www-data
+UMask=0027
+WorkingDirectory=/var/www/django_websites/Fabric/backend
+EnvironmentFile=/run/fabric/.env
+ExecStart=/var/www/django_websites/Fabric/backend/.venv/bin/python manage.py purge_fabric_history
+# Hardening, as on the fleet's app units (OPERATIONS.md §3.22). Never
+# ProtectSystem=strict on an app unit: it makes /var/www read-only.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+StandardOutput=journal
+StandardError=journal

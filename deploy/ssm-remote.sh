@@ -44,6 +44,8 @@ chmod 0755 /usr/local/sbin/fabric-env-fetch.sh
 echo "== install systemd units =="
 git show "origin/$BRANCH:deploy/systemd/fabric-env-fetch.service" > /etc/systemd/system/fabric-env-fetch.service
 git show "origin/$BRANCH:deploy/systemd/fabric-asgi.service" > /etc/systemd/system/fabric-asgi.service
+git show "origin/$BRANCH:deploy/systemd/fabric-purge.service" > /etc/systemd/system/fabric-purge.service
+git show "origin/$BRANCH:deploy/systemd/fabric-purge.timer" > /etc/systemd/system/fabric-purge.timer
 systemctl daemon-reload
 
 echo "== install nginx vhost =="
@@ -96,6 +98,8 @@ sudo -u django bash "$APP_DIR/deploy/ssm-deploy.sh"
 
 echo "== restart =="
 systemctl restart fabric-asgi
+# Daily retention purge (I4): idempotent, and keeps it scheduled after a reboot.
+systemctl enable --now fabric-purge.timer
 
 # chown BEFORE chmod: stripping o-rwx first would lock django out of files it
 # does not yet own (§3.1).

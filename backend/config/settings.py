@@ -299,6 +299,10 @@ FABRIC_COMMAND_OUTPUT_MAX_CHARS = int(
     _env("FABRIC_COMMAND_OUTPUT_MAX_CHARS", "200000")
 )
 
+#: Days of command output, events, approvals and messages kept before the daily
+#: purge (`manage.py purge_fabric_history`, systemd fabric-purge.timer).
+FABRIC_RETENTION_DAYS = max(int(_env("FABRIC_RETENTION_DAYS", "30")), 1)
+
 #: A command whose agent never reports back is timed out this long after its own
 #: `timeout_seconds` has elapsed.
 FABRIC_COMMAND_GRACE_SECONDS = int(_env("FABRIC_COMMAND_GRACE_SECONDS", "30"))
