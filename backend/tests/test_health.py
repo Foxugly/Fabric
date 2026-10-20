@@ -31,17 +31,50 @@ def test_health_degrades_when_the_channel_layer_is_unusable() -> None:
     assert response.status_code == 503
     payload = response.json()
     assert payload["status"] == "degraded"
-    assert payload["checks"]["channel_layer"] == "error: timeout"
+    assert payload["checks"]["channel_layer"] == "error"
     assert payload["checks"]["database"] == "ok"
 
 
 @pytest.mark.django_db
 def test_health_degrades_when_the_database_is_unusable() -> None:
-    with patch("config.health._check_database", return_value="error: OperationalError"):
+    with patch("config.health._check_database", return_value="error"):
         response = APIClient().get("/health/")
 
     assert response.status_code == 503
-    assert response.json()["checks"]["database"] == "error: OperationalError"
+    assert response.json()["checks"]["database"] == "error"
+
+
+@pytest.mark.django_db
+def test_health_never_exposes_exception_details(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Status only: the class name and message go to the server log (M8)."""
+    from django.db import OperationalError
+
+    secret = "could not connect to server at 10.0.0.12 port 5432"
+    with (
+        patch(
+            "config.health.connection.cursor", side_effect=OperationalError(secret)
+        ),
+        patch(
+            "config.health._round_trip", side_effect=ConnectionRefusedError(secret)
+        ),
+        caplog.at_level("ERROR", logger="apps.health"),
+    ):
+        response = APIClient().get("/health/")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "degraded",
+        "checks": {"database": "error", "channel_layer": "error"},
+    }
+    body = response.content.decode()
+    assert "OperationalError" not in body
+    assert "ConnectionRefusedError" not in body
+    assert "10.0.0.12" not in body
+    # ...but the operator still gets the details server-side.
+    assert "OperationalError" in caplog.text
+    assert "ConnectionRefusedError" in caplog.text
 
 
 @pytest.mark.django_db
