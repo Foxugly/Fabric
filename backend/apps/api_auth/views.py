@@ -7,16 +7,19 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import permissions, response, status, viewsets
 from rest_framework.request import Request
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.api_auth import refresh_cookie
+from apps.api_auth import mfa, refresh_cookie
 from apps.api_auth.models import PushItTarget
 from apps.api_auth.refresh_cookie import PERSIST_CLAIM, deliver_tokens
 from apps.api_auth.serializers import (
     LoginSerializer,
+    MfaCodeSerializer,
+    MfaTokenSerializer,
     PasswordChangeSerializer,
     PushItTargetSerializer,
     UserSerializer,
@@ -26,6 +29,9 @@ from apps.api_auth.throttles import (
     AccountDeleteRateThrottle,
     LoginRateThrottle,
     LoginUsernameRateThrottle,
+    MfaRateThrottle,
+    MfaRecoveryCodesRateThrottle,
+    MfaUserRateThrottle,
     PasswordChangeRateThrottle,
     WebSocketTicketRateThrottle,
 )
@@ -60,7 +66,37 @@ class IsAuthenticatedOrCookieMode(permissions.BasePermission):
         return bool(request.user and request.user.is_authenticated)
 
 
+def _complete_login(
+    request: Request, user: Any, *, remember_me: bool, **extra: Any
+) -> response.Response:
+    """Mint the JWT pair once the second factor is verified (the only path).
+
+    Cookie mode defaults to a browser-session cookie: "remember me" (chosen at
+    the password step, carried by the `mfa_token`) is an explicit choice. Body
+    mode has no cookie, so the claim is moot.
+    """
+    persist = remember_me or not refresh_cookie.wants_cookie(request)
+    return deliver_tokens(
+        request,
+        response.Response(
+            {**extra, **_token_payload(user, persist=persist)},
+            status=status.HTTP_200_OK,
+        ),
+    )
+
+
+def _mfa_error(exc: mfa.MfaError) -> response.Response:
+    return _error(exc.code, exc.detail)
+
+
 class LoginView(APIView):
+    """Password step. Never returns tokens: MFA is mandatory for every user.
+
+    200 `{mfa_required, mfa_token}` when the user is enrolled, else
+    `{mfa_setup_required, mfa_token}`. The token (5 min) is then presented to
+    `mfa/verify/`, or to `mfa/setup/` + `mfa/setup/confirm/`.
+    """
+
     permission_classes = [permissions.AllowAny]
     authentication_classes: list[type[Any]] = []
     # Login is the only barrier between the Internet and remote code execution on
@@ -74,16 +110,113 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data["user"]
-        # Cookie mode defaults to a browser-session cookie: "remember me" is an
-        # explicit choice. Body mode has no cookie, so the claim is moot.
-        persist = bool(serializer.validated_data.get("remember_me")) or (
-            not refresh_cookie.wants_cookie(request)
+        token, enrolled = mfa.issue_mfa_token(
+            user, remember_me=bool(serializer.validated_data.get("remember_me"))
         )
-        return deliver_tokens(
-            request,
-            response.Response(
-                _token_payload(user, persist=persist), status=status.HTTP_200_OK
-            ),
+        key = "mfa_required" if enrolled else "mfa_setup_required"
+        return response.Response(
+            {key: True, "mfa_token": token}, status=status.HTTP_200_OK
+        )
+
+
+class _MfaCodeView(APIView):
+    """Second-factor step: anonymous, Origin-checked in cookie mode, and
+    throttled per client IP and per account (a 6-digit code is guessable)."""
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes: list[type[Any]] = []
+    throttle_classes = [MfaRateThrottle, MfaUserRateThrottle]
+
+
+class MfaSetupView(APIView):
+    """Enrolment, step 1: the pending secret as an `otpauth://` URI and a QR.
+
+    Calling it again returns the same pending secret. It checks no code, so
+    the default anonymous throttle is enough.
+    """
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes: list[type[Any]] = []
+    throttle_classes = [AnonRateThrottle]
+
+    def post(self, request: Request) -> response.Response:
+        if (rejected := refresh_cookie.cookie_origin_guard(request)) is not None:
+            return rejected
+        serializer = MfaTokenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            user, secret = mfa.pending_setup(serializer.validated_data["mfa_token"])
+        except mfa.MfaError as exc:
+            return _mfa_error(exc)
+        uri = mfa.provisioning_uri(secret, user.get_username())
+        return response.Response(
+            {
+                "otpauth_uri": uri,
+                "secret": secret,
+                "qr_svg": mfa.qr_svg_data_uri(uri),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class MfaSetupConfirmView(_MfaCodeView):
+    """Enrolment, step 2: a first code enables MFA and completes the login.
+
+    The 10 recovery codes are in this response and nowhere else, ever.
+    """
+
+    def post(self, request: Request) -> response.Response:
+        if (rejected := refresh_cookie.cookie_origin_guard(request)) is not None:
+            return rejected
+        serializer = MfaCodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            user, remember_me, codes = mfa.confirm_setup(
+                serializer.validated_data["mfa_token"],
+                serializer.validated_data["code"],
+            )
+        except mfa.MfaError as exc:
+            return _mfa_error(exc)
+        return _complete_login(
+            request, user, remember_me=remember_me, recovery_codes=codes
+        )
+
+
+class MfaVerifyView(_MfaCodeView):
+    """A TOTP code (or a one-time recovery code) completes the login."""
+
+    def post(self, request: Request) -> response.Response:
+        if (rejected := refresh_cookie.cookie_origin_guard(request)) is not None:
+            return rejected
+        serializer = MfaCodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            user, remember_me = mfa.verify(
+                serializer.validated_data["mfa_token"],
+                serializer.validated_data["code"],
+            )
+        except mfa.MfaError as exc:
+            return _mfa_error(exc)
+        return _complete_login(request, user, remember_me=remember_me)
+
+
+class MfaRecoveryCodesView(APIView):
+    """Signed in: replace the 10 recovery codes (password-confirmed)."""
+
+    throttle_classes = [MfaRecoveryCodesRateThrottle]
+
+    def post(self, request: Request) -> response.Response:
+        if (rejected := refresh_cookie.cookie_origin_guard(request)) is not None:
+            return rejected
+        user: Any = request.user
+        password = str(_request_data(request).get("password") or "")
+        if not password or not user.check_password(password):
+            return _error("password_invalid", "Password is incorrect.")
+        if not mfa.is_enabled(user):
+            return _error("mfa_not_enabled", "MFA is not set up.")
+        return response.Response(
+            {"recovery_codes": mfa.regenerate_recovery_codes(user)},
+            status=status.HTTP_200_OK,
         )
 
 

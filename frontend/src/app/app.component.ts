@@ -1,4 +1,5 @@
 import { NgClass, NgFor, NgIf } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -17,13 +18,16 @@ import { Agent, AuthSession, Command, CommandStatus, FabricEvent } from './model
 import { NotificationsPanelComponent } from './notifications-panel.component';
 
 import { AgentService } from './services/agent.service';
-import { AuthService } from './services/auth.service';
+import { AuthService, MfaSetup } from './services/auth.service';
 import { CommandService } from './services/command.service';
 import { EventStreamService } from './services/event-stream.service';
 import { RuntimeErrorService } from './services/runtime-error.service';
 import { routeTerminalLine } from './terminal-routing';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { LanguageSwitcherComponent } from './i18n/language-switcher.component';
+
+/** Sign-in screens: password, then the mandatory second factor. */
+type LoginStep = 'password' | 'verify' | 'setup' | 'codes';
 
 const FINAL_COMMAND_STATUSES = new Set<CommandStatus>([
   'succeeded',
@@ -181,7 +185,7 @@ interface PendingPermission {
       <ng-template #loginView>
         <div class="login-shell">
           <section class="login-panel">
-            <form (ngSubmit)="submitLogin()">
+            <form *ngIf="loginStep() === 'password'" (ngSubmit)="submitLogin()">
               <h2>{{ 'login.signIn' | transloco }}</h2>
               <input
                 name="username"
@@ -216,7 +220,94 @@ interface PendingPermission {
               </div>
               <button type="submit">{{ 'login.signIn' | transloco }}</button>
               <div class="login-error" *ngIf="loginError()">{{ loginError() }}</div>
+              <div class="login-error" *ngIf="loginErrorKey()">{{ loginErrorKey() | transloco }}</div>
             </form>
+
+            <!-- Second factor: TOTP code, or a one-time recovery code. -->
+            <form *ngIf="loginStep() === 'verify'" (ngSubmit)="submitMfaCode()">
+              <h2>{{ 'login.mfa.title' | transloco }}</h2>
+              <p class="login-hint">
+                {{ (useRecoveryCode() ? 'login.mfa.recoveryHint' : 'login.mfa.codeHint') | transloco }}
+              </p>
+              <input
+                *ngIf="!useRecoveryCode()"
+                name="mfaCode"
+                class="mfa-code"
+                [ngModel]="mfaCode()"
+                (ngModelChange)="mfaCode.set($event)"
+                autocomplete="one-time-code"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                maxlength="6"
+                [placeholder]="'login.mfa.codePlaceholder' | transloco"
+              />
+              <input
+                *ngIf="useRecoveryCode()"
+                name="recoveryCode"
+                class="mfa-code"
+                [ngModel]="mfaCode()"
+                (ngModelChange)="mfaCode.set($event)"
+                autocomplete="off"
+                autocapitalize="characters"
+                spellcheck="false"
+                maxlength="11"
+                [placeholder]="'login.mfa.recoveryPlaceholder' | transloco"
+              />
+              <button type="submit" [disabled]="mfaBusy()">{{ 'login.mfa.verify' | transloco }}</button>
+              <button type="button" class="link-button" (click)="toggleRecoveryCode()">
+                {{ (useRecoveryCode() ? 'login.mfa.useAuthenticator' : 'login.mfa.useRecoveryCode') | transloco }}
+              </button>
+              <button type="button" class="link-button" (click)="backToPassword()">
+                {{ 'login.mfa.back' | transloco }}
+              </button>
+              <div class="login-error" *ngIf="loginErrorKey()">{{ loginErrorKey() | transloco }}</div>
+            </form>
+
+            <!-- First sign-in: enrol an authenticator app (MFA is mandatory). -->
+            <form *ngIf="loginStep() === 'setup'" (ngSubmit)="submitMfaSetup()">
+              <h2>{{ 'login.mfa.setupTitle' | transloco }}</h2>
+              <p class="login-hint">{{ 'login.mfa.setupHint' | transloco }}</p>
+              <ng-container *ngIf="mfaSetup() as setup; else setupLoading">
+                <img class="mfa-qr" [src]="setup.qrSvg" [alt]="'login.mfa.qrAlt' | transloco" width="200" height="200" />
+                <p class="login-hint">{{ 'login.mfa.manualEntry' | transloco }}</p>
+                <code class="mfa-secret">{{ groupSecret(setup.secret) }}</code>
+              </ng-container>
+              <ng-template #setupLoading>
+                <p class="login-hint">{{ 'login.mfa.loading' | transloco }}</p>
+              </ng-template>
+              <input
+                name="setupCode"
+                class="mfa-code"
+                [ngModel]="mfaCode()"
+                (ngModelChange)="mfaCode.set($event)"
+                autocomplete="one-time-code"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                maxlength="6"
+                [placeholder]="'login.mfa.codePlaceholder' | transloco"
+              />
+              <button type="submit" [disabled]="mfaBusy() || mfaSetup() === null">
+                {{ 'login.mfa.activate' | transloco }}
+              </button>
+              <button type="button" class="link-button" (click)="backToPassword()">
+                {{ 'login.mfa.back' | transloco }}
+              </button>
+              <div class="login-error" *ngIf="loginErrorKey()">{{ loginErrorKey() | transloco }}</div>
+            </form>
+
+            <!-- Recovery codes: shown once, right after enrolment. -->
+            <div *ngIf="loginStep() === 'codes'" class="mfa-codes-step">
+              <h2>{{ 'login.mfa.codesTitle' | transloco }}</h2>
+              <p class="login-hint">{{ 'login.mfa.codesHint' | transloco }}</p>
+              <ul class="recovery-codes">
+                <li *ngFor="let code of recoveryCodes()"><code>{{ code }}</code></li>
+              </ul>
+              <button type="button" class="secondary-button" (click)="copyRecoveryCodes()">
+                {{ (codesCopied() ? 'login.mfa.copied' : 'login.mfa.copy') | transloco }}
+              </button>
+              <button type="button" (click)="finishEnrolment()">{{ 'login.mfa.saved' | transloco }}</button>
+              <div class="login-error" *ngIf="loginErrorKey()">{{ loginErrorKey() | transloco }}</div>
+            </div>
           </section>
         </div>
       </ng-template>
@@ -477,9 +568,75 @@ interface PendingPermission {
       border: 1px solid #1f2a37;
     }
 
-    .login-panel form {
+    .login-panel form,
+    .login-panel .mfa-codes-step {
       flex-direction: column;
       align-items: stretch;
+    }
+
+    .login-panel .mfa-codes-step {
+      display: flex;
+      gap: 12px;
+    }
+
+    .login-hint {
+      margin: 0;
+      color: #9ca3af;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .login-panel .mfa-code {
+      letter-spacing: 0.2em;
+      text-align: center;
+      font-family: Consolas, "Courier New", monospace;
+    }
+
+    .mfa-qr {
+      align-self: center;
+      width: 200px;
+      height: 200px;
+      padding: 8px;
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .mfa-secret {
+      display: block;
+      padding: 8px;
+      border-radius: 6px;
+      background: #111827;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 13px;
+      text-align: center;
+      overflow-wrap: anywhere;
+      user-select: all;
+    }
+
+    .recovery-codes {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 6px;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 14px;
+      text-align: center;
+    }
+
+    .login-panel .link-button {
+      height: auto;
+      padding: 4px 0;
+      background: transparent;
+      border: none;
+      color: #93c5fd;
+      font-size: 13px;
+    }
+
+    .login-panel .link-button:hover,
+    .login-panel .link-button:focus-visible {
+      text-decoration: underline;
     }
 
     .login-panel input,
@@ -570,6 +727,16 @@ export class AppComponent implements OnDestroy {
   readonly loginPassword = signal('');
   readonly showPassword = signal(false);
   readonly loginError = signal('');
+  /** Translation key of a sign-in error (MFA steps). */
+  readonly loginErrorKey = signal('');
+  readonly loginStep = signal<LoginStep>('password');
+  readonly mfaCode = signal('');
+  readonly useRecoveryCode = signal(false);
+  readonly mfaSetup = signal<MfaSetup | null>(null);
+  /** Shown once after enrolment, then dropped from memory. */
+  readonly recoveryCodes = signal<string[]>([]);
+  readonly codesCopied = signal(false);
+  readonly mfaBusy = signal(false);
   readonly claudeSessionId = signal<string | null>(null);
   readonly claudePermissionMode = signal(DEFAULT_CLAUDE_PERMISSION_MODE);
   /** `claude:on`: every line goes to Claude without the `claude` prefix. */
@@ -740,13 +907,20 @@ export class AppComponent implements OnDestroy {
 
   submitLogin(): void {
     this.loginError.set('');
+    this.loginErrorKey.set('');
     this.authService.login(this.loginUsername(), this.loginPassword()).subscribe({
-      next: () => {
-        // Don't keep the password in memory (or on screen) once signed in.
+      next: (challenge) => {
+        // The password is checked: don't keep it in memory (or on screen).
         this.loginPassword.set('');
         this.showPassword.set(false);
-        this.runtimeErrorService.clear();
-        this.refreshAll();
+        this.mfaCode.set('');
+        this.useRecoveryCode.set(false);
+        if (challenge === 'verify') {
+          this.loginStep.set('verify');
+          return;
+        }
+        this.loginStep.set('setup');
+        this.loadMfaSetup();
       },
       error: (errorResponse: unknown) => {
         this.loginError.set(this.extractHttpError(errorResponse, 'Sign-in failed'));
@@ -754,10 +928,113 @@ export class AppComponent implements OnDestroy {
     });
   }
 
+  submitMfaCode(): void {
+    const code = this.mfaCode().trim();
+    if (code === '' || this.mfaBusy()) {
+      return;
+    }
+    this.loginErrorKey.set('');
+    this.mfaBusy.set(true);
+    this.authService.verifyMfa(code).subscribe({
+      next: () => {
+        this.resetMfaState();
+        this.runtimeErrorService.clear();
+        this.refreshAll();
+      },
+      error: (error: unknown) => this.handleMfaError(error),
+    });
+  }
+
+  submitMfaSetup(): void {
+    const code = this.mfaCode().trim();
+    if (code === '' || this.mfaBusy()) {
+      return;
+    }
+    this.loginErrorKey.set('');
+    this.mfaBusy.set(true);
+    this.authService.confirmMfaSetup(code).subscribe({
+      next: (codes) => {
+        this.mfaBusy.set(false);
+        this.mfaCode.set('');
+        this.mfaSetup.set(null);
+        this.recoveryCodes.set(codes);
+        this.loginStep.set('codes');
+      },
+      error: (error: unknown) => this.handleMfaError(error),
+    });
+  }
+
+  toggleRecoveryCode(): void {
+    this.useRecoveryCode.set(!this.useRecoveryCode());
+    this.mfaCode.set('');
+    this.loginErrorKey.set('');
+  }
+
+  copyRecoveryCodes(): void {
+    void this.writeClipboard(this.recoveryCodes().join('\n'))
+      .then(() => this.codesCopied.set(true))
+      .catch(() => this.loginErrorKey.set('login.mfa.copyFailed'));
+  }
+
+  /** "I saved them": the held-back session starts now. */
+  finishEnrolment(): void {
+    this.resetMfaState();
+    this.authService.completeEnrolment();
+    this.runtimeErrorService.clear();
+    this.refreshAll();
+  }
+
+  backToPassword(): void {
+    this.authService.cancelMfa();
+    this.resetMfaState();
+  }
+
+  /** `ABCD EFGH …`: easier to type into an authenticator by hand. */
+  groupSecret(secret: string): string {
+    return secret.replace(/(.{4})/g, '$1 ').trim();
+  }
+
+  private loadMfaSetup(): void {
+    this.mfaSetup.set(null);
+    this.authService.mfaSetup().subscribe({
+      next: (setup) => this.mfaSetup.set(setup),
+      error: (error: unknown) => this.handleMfaError(error),
+    });
+  }
+
+  private handleMfaError(error: unknown): void {
+    this.mfaBusy.set(false);
+    this.mfaCode.set('');
+    const code = error instanceof HttpErrorResponse ? this.asRecord(error.error)?.['code'] : undefined;
+    if (code === 'mfa_token_invalid') {
+      // Expired or already used: start over from the password.
+      this.backToPassword();
+      this.loginErrorKey.set('login.mfa.expired');
+      return;
+    }
+    if (error instanceof HttpErrorResponse && error.status === 429) {
+      this.loginErrorKey.set('login.mfa.throttled');
+      return;
+    }
+    this.loginErrorKey.set(code === 'mfa_invalid_code' ? 'login.mfa.invalidCode' : 'login.mfa.failed');
+  }
+
+  private resetMfaState(): void {
+    this.loginStep.set('password');
+    this.loginErrorKey.set('');
+    this.mfaCode.set('');
+    this.useRecoveryCode.set(false);
+    this.mfaSetup.set(null);
+    this.recoveryCodes.set([]);
+    this.codesCopied.set(false);
+    this.mfaBusy.set(false);
+  }
+
   logout(): void {
     this.authService.logout().subscribe({
       next: () => {
         this.loginError.set('');
+        this.resetMfaState();
         this.clearTerminalState();
       },
     });

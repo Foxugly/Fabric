@@ -7,6 +7,7 @@ from typing import Any, cast
 import pytest
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from mfa_helpers import enroll, login
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.token_blacklist.models import (
     BlacklistedToken,
@@ -20,7 +21,14 @@ COOKIE = "fabric_refresh"
 
 @pytest.fixture
 def user(db: Any) -> Any:
-    return get_user_model().objects.create_user(**CREDENTIALS)
+    created = get_user_model().objects.create_user(**CREDENTIALS)
+    created.totp_secret = enroll(created)  # type: ignore[attr-defined]
+    return created
+
+
+def _login(client: APIClient, user: Any) -> Any:
+    """Password + TOTP: the only way to obtain tokens."""
+    return login(client, CREDENTIALS, user.totp_secret)
 
 
 def _rate(scope: str) -> int:
@@ -119,7 +127,7 @@ def test_authenticated_users_are_throttled_too(user: Any) -> None:
 def test_cookie_mode_login_sets_an_httponly_cookie_and_hides_the_refresh(
     user: Any,
 ) -> None:
-    response = _cookie_client().post("/api/v1/auth/login/", CREDENTIALS, format="json")
+    response = _login(_cookie_client(), user)
 
     assert response.status_code == 200
     body = response.json()
@@ -136,7 +144,7 @@ def test_cookie_mode_login_sets_an_httponly_cookie_and_hides_the_refresh(
 @pytest.mark.django_db
 def test_cookie_mode_refresh_rotates_the_cookie(user: Any) -> None:
     client = _cookie_client()
-    login = client.post("/api/v1/auth/login/", CREDENTIALS, format="json")
+    login = _login(client, user)
     first = login.cookies[COOKIE].value
 
     refreshed = client.post("/api/v1/auth/refresh/", {}, format="json")
@@ -164,7 +172,7 @@ def test_cookie_mode_refresh_without_cookie_is_401(user: Any) -> None:
 @pytest.mark.parametrize("path", ["/api/v1/auth/refresh/", "/api/v1/auth/logout/"])
 def test_cookie_mode_refuses_a_foreign_origin(user: Any, path: str) -> None:
     client = _cookie_client()
-    client.post("/api/v1/auth/login/", CREDENTIALS, format="json")
+    _login(client, user)
     client.credentials(HTTP_X_AUTH_MODE="cookie", HTTP_ORIGIN="https://evil.example")
 
     response = client.post(path, {}, format="json")
@@ -186,7 +194,7 @@ def test_cookie_mode_refuses_a_missing_origin(user: Any) -> None:
 @pytest.mark.django_db
 def test_cookie_mode_logout_blacklists_and_clears_the_cookie(user: Any) -> None:
     client = _cookie_client()
-    login = client.post("/api/v1/auth/login/", CREDENTIALS, format="json")
+    login = _login(client, user)
     refresh = login.cookies[COOKIE].value
 
     response = client.post("/api/v1/auth/logout/", {}, format="json")
@@ -202,9 +210,7 @@ def test_cookie_mode_logout_blacklists_and_clears_the_cookie(user: Any) -> None:
 @pytest.mark.django_db
 def test_access_token_authenticates_the_api(user: Any) -> None:
     access = (
-        APIClient()
-        .post("/api/v1/auth/login/", CREDENTIALS, format="json")
-        .json()["access"]
+_login(APIClient(), user).json()["access"]
     )
     client = APIClient()
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
@@ -215,12 +221,10 @@ def test_access_token_authenticates_the_api(user: Any) -> None:
 @pytest.mark.django_db
 def test_password_change_revokes_every_refresh_token(user: Any) -> None:
     other_session = (
-        APIClient()
-        .post("/api/v1/auth/login/", CREDENTIALS, format="json")
-        .json()["refresh"]
+_login(APIClient(), user).json()["refresh"]
     )
     client = _cookie_client()
-    login = client.post("/api/v1/auth/login/", CREDENTIALS, format="json")
+    login = _login(client, user)
     client.credentials(
         HTTP_X_AUTH_MODE="cookie",
         HTTP_ORIGIN=ORIGIN,
@@ -266,7 +270,7 @@ def test_password_change_refuses_a_wrong_current_password(user: Any) -> None:
 @pytest.mark.django_db
 def test_any_password_change_path_revokes_refresh_tokens(user: Any) -> None:
     """`manage.py changepassword` and the admin end in the same save()."""
-    APIClient().post("/api/v1/auth/login/", CREDENTIALS, format="json")
+    _login(APIClient(), user)
     assert OutstandingToken.objects.filter(user=user).count() == 1
 
     user.set_password("changed-from-the-shell")

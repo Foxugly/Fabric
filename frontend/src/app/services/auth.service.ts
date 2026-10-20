@@ -24,6 +24,27 @@ interface LoginResponse {
   user: FabricUser;
 }
 
+/** Password step: never tokens, only the second-factor challenge. */
+interface PasswordStepResponse {
+  mfa_required?: boolean;
+  mfa_setup_required?: boolean;
+  mfa_token: string;
+}
+
+interface MfaConfirmResponse extends LoginResponse {
+  recovery_codes: string[];
+}
+
+/** What the password step asks for next. */
+export type MfaChallenge = 'verify' | 'setup';
+
+/** Enrolment data: scan `qrSvg` (a data URI) or type `secret` by hand. */
+export interface MfaSetup {
+  otpauthUri: string;
+  secret: string;
+  qrSvg: string;
+}
+
 interface RefreshResponse {
   access: string;
 }
@@ -68,6 +89,10 @@ export class AuthService {
   private access: string | null = null;
   private readonly sessionSubject = new BehaviorSubject<AuthSession | null>(null);
   private refreshRequest$: Observable<string> | null = null;
+  // Memory only, never storage: it stands for "password already checked".
+  private mfaToken: string | null = null;
+  // Enrolment: signed in, but held back until the recovery codes are saved.
+  private enrolledSession: AuthSession | null = null;
 
   readonly session$ = this.sessionSubject.asObservable();
 
@@ -93,23 +118,106 @@ export class AuthService {
     return this.access !== null || readStorageItem(SESSION_HINT_KEY) !== null;
   }
 
-  login(username: string, password: string): Observable<AuthSession> {
+  /** Whether a password step is waiting for its second factor. */
+  get hasPendingMfa(): boolean {
+    return this.mfaToken !== null;
+  }
+
+  /**
+   * Password step. MFA is mandatory: the answer is never a session but the
+   * challenge to meet next (`verify` a code, or `setup` an authenticator).
+   */
+  login(username: string, password: string): Observable<MfaChallenge> {
+    this.mfaToken = null;
     return this.http
-      .post<LoginResponse>(
+      .post<PasswordStepResponse>(
         this.apiBase.buildUrl('/auth/login/'),
         { username, password },
-        { ...cookieAuthOptions(), context: new HttpContext().set(SKIP_AUTH, true) },
+        this.authOptions(),
       )
       .pipe(
         map((response) => {
-          this.access = response.access;
-          return { user: response.user };
-        }),
-        tap((session) => {
-          this.sessionSubject.next(session);
-          this.announceSessionChange();
+          this.mfaToken = response.mfa_token;
+          return response.mfa_required ? 'verify' : 'setup';
         }),
       );
+  }
+
+  /** Enrolment: the pending secret (the same one on every call). */
+  mfaSetup(): Observable<MfaSetup> {
+    // Deferred: a missing token surfaces as an Observable error.
+    return defer(() =>
+      this.http
+        .post<{ otpauth_uri: string; secret: string; qr_svg: string }>(
+          this.apiBase.buildUrl('/auth/mfa/setup/'),
+          { mfa_token: this.requireMfaToken() },
+          this.authOptions(),
+        )
+        .pipe(map((r) => ({ otpauthUri: r.otpauth_uri, secret: r.secret, qrSvg: r.qr_svg }))),
+    );
+  }
+
+  /**
+   * Enrolment: the first code enables MFA and signs in. The session is held
+   * back until `completeEnrolment()`, so the recovery codes can be shown once.
+   */
+  confirmMfaSetup(code: string): Observable<string[]> {
+    // Deferred: a missing token surfaces as an Observable error.
+    return defer(() =>
+      this.http
+        .post<MfaConfirmResponse>(
+          this.apiBase.buildUrl('/auth/mfa/setup/confirm/'),
+          { mfa_token: this.requireMfaToken(), code },
+          this.authOptions(),
+        )
+        .pipe(
+          map((response) => {
+            this.mfaToken = null;
+            this.access = response.access;
+            this.enrolledSession = { user: response.user };
+            return response.recovery_codes;
+          }),
+        ),
+    );
+  }
+
+  /** The recovery codes are saved: enter the app. */
+  completeEnrolment(): void {
+    const session = this.enrolledSession;
+    this.enrolledSession = null;
+    if (session !== null) {
+      this.startSession(session);
+    }
+  }
+
+  /** A TOTP code or a recovery code completes the sign-in. */
+  verifyMfa(code: string): Observable<AuthSession> {
+    // Deferred: a missing token surfaces as an Observable error.
+    return defer(() =>
+      this.http
+        .post<LoginResponse>(
+          this.apiBase.buildUrl('/auth/mfa/verify/'),
+          { mfa_token: this.requireMfaToken(), code },
+          this.authOptions(),
+        )
+        .pipe(
+          map((response) => {
+            this.mfaToken = null;
+            this.access = response.access;
+            return { user: response.user };
+          }),
+          tap((session) => this.startSession(session)),
+        ),
+    );
+  }
+
+  /** Back to the password step. */
+  cancelMfa(): void {
+    this.mfaToken = null;
+    if (this.enrolledSession !== null) {
+      this.enrolledSession = null;
+      this.access = null;
+    }
   }
 
   /**
@@ -192,10 +300,28 @@ export class AuthService {
    */
   clearSession(): void {
     this.access = null;
+    this.mfaToken = null;
+    this.enrolledSession = null;
     this.sessionSubject.next(null);
     removeStorageItem(SESSION_HINT_KEY);
     removeStorageItem(LEGACY_SESSION_KEY);
     clearTerminalStorage();
+  }
+
+  private startSession(session: AuthSession): void {
+    this.sessionSubject.next(session);
+    this.announceSessionChange();
+  }
+
+  private requireMfaToken(): string {
+    if (this.mfaToken === null) {
+      throw new Error('No sign-in in progress');
+    }
+    return this.mfaToken;
+  }
+
+  private authOptions(): { headers: HttpHeaders; withCredentials: true; context: HttpContext } {
+    return { ...cookieAuthOptions(), context: new HttpContext().set(SKIP_AUTH, true) };
   }
 
   private postRefresh(): Observable<string> {

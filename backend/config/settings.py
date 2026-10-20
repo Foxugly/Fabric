@@ -197,6 +197,11 @@ REST_FRAMEWORK = {
         "password_change": _env("THROTTLE_PASSWORD_CHANGE", "5/min"),
         "account_delete": _env("THROTTLE_ACCOUNT_DELETE", "5/min"),
         "ws_ticket": _env("THROTTLE_WS_TICKET", "30/min"),
+        # TOTP second factor: a 6-digit code is guessable, so verify/confirm
+        # are bounded per client IP AND per account (the one the mfa_token names).
+        "mfa": _env("THROTTLE_MFA", "5/min"),
+        "mfa_user": _env("THROTTLE_MFA_USER", "5/min"),
+        "mfa_recovery_codes": _env("THROTTLE_MFA_RECOVERY_CODES", "5/min"),
     },
     # nginx is the single reverse proxy: trust only the last X-Forwarded-For
     # entry (the peer nginx saw), never what the client put there itself.
@@ -243,6 +248,16 @@ AUTH_REFRESH_COOKIE_SECURE = _env_bool("AUTH_REFRESH_COOKIE_SECURE", True)
 #: URL; being single-use and short-lived is what keeps it out of harm's way in
 #: access logs.
 FABRIC_WS_TICKET_TTL_SECONDS = min(int(_env("FABRIC_WS_TICKET_TTL_SECONDS", "30")), 30)
+
+#: Mandatory TOTP second factor (web login). The TOTP secrets are encrypted at
+#: rest with Fernet; the key is derived with HKDF-SHA256 from
+#: `FABRIC_MFA_ENCRYPTION_KEY` when set, else from `SECRET_KEY`. Changing the
+#: source key makes every enrolled secret unreadable: run `reset_mfa` for each
+#: user, who then re-enrolls at the next sign-in.
+FABRIC_MFA_ENCRYPTION_KEY = _env("FABRIC_MFA_ENCRYPTION_KEY")
+#: Lifetime of the `mfa_token` handed out by the password step.
+FABRIC_MFA_TOKEN_TTL_SECONDS = 300
+FABRIC_MFA_ISSUER = "Fabric"
 
 #: An agent grants remote code execution on the machine it runs on. Outside debug
 #: Fabric is assumed reachable from the Internet, so transport security is

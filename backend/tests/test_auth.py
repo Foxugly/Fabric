@@ -7,6 +7,7 @@ import pytest
 from asgiref.sync import sync_to_async
 from channels.testing.websocket import WebsocketCommunicator
 from django.contrib.auth import get_user_model
+from mfa_helpers import enroll, login
 from rest_framework.test import APIClient
 from ws_helpers import BROWSER_HEADERS, agent_headers, events_path
 
@@ -17,13 +18,12 @@ from config.asgi import application
 
 
 @pytest.mark.django_db
-def test_login_returns_jwt_pair(api_user: object) -> None:
+def test_login_returns_jwt_pair_after_the_totp_step(api_user: object) -> None:
     client = APIClient()
+    secret = enroll(api_user)
 
-    response = client.post(
-        "/api/v1/auth/login/",
-        {"username": "fabric-admin", "password": "fabric-password"},
-        format="json",
+    response = login(
+        client, {"username": "fabric-admin", "password": "fabric-password"}, secret
     )
 
     assert response.status_code == 200

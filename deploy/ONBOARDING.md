@@ -58,6 +58,13 @@ put THROTTLE_LOGIN        10/hour
 # refresh/logout en mode cookie : sans https://fabric.foxugly.com, plus de session.
 put JWT_ACCESS_MINUTES    15
 put JWT_REFRESH_DAYS      7
+# MFA TOTP (obligatoire) : throttles optionnels, 5/min par défaut.
+# put THROTTLE_MFA        5/min   # par IP, verify + setup/confirm
+# put THROTTLE_MFA_USER   5/min   # par compte
+# Clé de chiffrement des secrets TOTP : optionnelle. Absente, elle est dérivée
+# (HKDF) de SECRET_KEY. La changer (ou changer SECRET_KEY sans elle) rend les
+# secrets enrôlés illisibles -> reset_mfa pour chaque utilisateur.
+# put FABRIC_MFA_ENCRYPTION_KEY "$(openssl rand -base64 48)" SecureString
 
 # DB_* 6-var convention (§3.13)
 put DB_ENGINE postgresql
@@ -335,6 +342,22 @@ troisième uniquement les grants `fabric-*`, la quatrième daphne.
 
    Ensuite `create_dev_agent --owner <op>` pour l'agent du PC. Changer le mot de passe révoque toutes les sessions
    (refresh tokens blacklistés), quel que soit le chemin (API, `changepassword`).
+
+   **MFA TOTP obligatoire.** La première connexion web de `<op>` l'enrôle :
+   QR code à scanner avec une appli d'authentification, premier code, puis
+   10 codes de secours affichés **une seule fois** (à ranger dans le
+   gestionnaire de mots de passe). Les connexions suivantes demandent le code
+   à 6 chiffres (ou un code de secours). Le déploiement de la migration
+   `api_auth.0004` déconnecte toutes les sessions existantes.
+
+   **Verrouillé (téléphone perdu, plus de codes de secours)** — sur la box, même
+   environnement que ci-dessus :
+
+   ```bash
+   .venv/bin/python manage.py reset_mfa <op>   # efface le MFA + révoque les sessions
+   ```
+
+   La connexion suivante ré-enrôle un nouvel authentificateur.
 
    **Admin Django** : fermé à Internet. L'administration passe par `manage.py`
    en SSH. Pour un diagnostic ponctuel, un tunnel `ssh -L 8008:127.0.0.1:8008`

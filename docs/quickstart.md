@@ -71,7 +71,20 @@ curl http://127.0.0.1:8000/api/v1/auth/login/ ^
   -d "{\"username\":\"fabric-admin\",\"password\":\"fabric-password\"}"
 ```
 
-La réponse contient `access` (JWT, 15 min) et `refresh` : sans `X-Auth-Mode: cookie`, le refresh reste dans le corps (usage script). Le SPA, lui, garde le refresh dans un cookie HttpOnly.
+Le MFA TOTP est obligatoire : la réponse ne contient **pas** de jeton mais
+`{"mfa_setup_required": true, "mfa_token": "…"}` (premier login) ou
+`{"mfa_required": true, "mfa_token": "…"}`. Le plus simple est de se connecter
+une première fois depuis le frontend (étape 7), qui affiche le QR code à scanner
+puis les codes de secours. En ligne de commande, une fois enrôlé :
+
+```bash
+curl http://127.0.0.1:8000/api/v1/auth/mfa/verify/ ^
+  -H "Content-Type: application/json" ^
+  -d "{\"mfa_token\":\"<mfa_token>\",\"code\":\"<code TOTP>\"}"
+```
+
+Cette réponse contient `access` (JWT, 15 min) et `refresh` : sans `X-Auth-Mode: cookie`, le refresh reste dans le corps (usage script). Le SPA, lui, garde le refresh dans un cookie HttpOnly.
+Authentificateur perdu : `python manage.py reset_mfa fabric-admin`.
 
 ## 7. Lancer le frontend
 
