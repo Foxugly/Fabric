@@ -41,5 +41,11 @@ class PasswordChangeRateThrottle(UserRateThrottle):
     scope = "password_change"
 
 
+class AccountDeleteRateThrottle(UserRateThrottle):
+    """Per user: account deletion checks the password, so it is an oracle too."""
+
+    scope = "account_delete"
+
+
 class WebSocketTicketRateThrottle(UserRateThrottle):
     scope = "ws_ticket"

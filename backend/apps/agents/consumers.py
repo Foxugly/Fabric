@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import json
 import logging
+import re
+import time
 from typing import Any
+from uuid import UUID
 
 from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
+from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from shared.protocol import ProtocolValidationError, build_message, parse_message
 
@@ -30,6 +36,13 @@ from apps.commands.notifications import (
     notify_command_finished,
     notify_permission_request,
 )
+from apps.commands.output_cap import (
+    ERROR_MAX_CHARS,
+    TOOL_INPUT_MAX_CHARS,
+    cap_strings,
+    cap_text,
+    output_max_chars,
+)
 from apps.conversations.services import (
     sync_message_for_command_completed,
     sync_message_for_command_failed,
@@ -38,6 +51,114 @@ from apps.conversations.services import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+_FINGERPRINT = re.compile(r"[0-9a-f]{64}")
+
+
+def _fingerprint(value: object) -> str:
+    """The agent's SHA-256 of the request, kept only if it looks like one."""
+    if isinstance(value, str) and _FINGERPRINT.fullmatch(value):
+        return value
+    return ""
+
+
+#: Close codes: 1008 policy violation (rate), 1009 message too big.
+CLOSE_RATE_LIMITED = 1008
+CLOSE_TOO_BIG = 1009
+
+#: Statuses a command can still receive output in.
+_ACTIVE_STATUSES = {
+    CommandStatus.DISPATCHED,
+    CommandStatus.RUNNING,
+    CommandStatus.WAITING_USER_ACTION,
+}
+
+_MAX_SEQUENCE = 2_147_483_647
+
+_COMMAND_MESSAGES = {
+    "command.accepted",
+    "command.started",
+    "command.progress",
+    "session.action_required",
+    "command.completed",
+    "command.failed",
+}
+
+
+def _is_uuid(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        UUID(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _optional(payload: dict[str, Any], key: str, kind: type | tuple[type, ...]) -> bool:
+    value = payload.get(key)
+    return value is None or isinstance(value, kind)
+
+
+def _payload_error(message_type: str, payload: dict[str, Any]) -> str | None:
+    """Why this payload cannot be processed, or None (M1).
+
+    Every field a handler reads is checked here, so a malformed message gets a
+    protocol error instead of an exception that would tear the socket down and
+    fail every command in flight.
+    """
+    if message_type in _COMMAND_MESSAGES and not _is_uuid(payload.get("command_id")):
+        return "command_id must be a UUID"
+
+    if message_type == "agent.hello":
+        if not (
+            _optional(payload, "version", str)
+            and _optional(payload, "operating_system", str)
+        ):
+            return "version and operating_system must be strings"
+    elif message_type == "provider.capabilities":
+        capabilities = payload.get("capabilities", [])
+        if not isinstance(capabilities, list) or not all(
+            isinstance(item, str) and len(item) <= 255 for item in capabilities
+        ):
+            return "capabilities must be a list of strings"
+    elif message_type == "command.progress":
+        sequence = payload.get("sequence", 0)
+        if (
+            isinstance(sequence, bool)
+            or not isinstance(sequence, int)
+            or not 0 <= sequence <= _MAX_SEQUENCE
+        ):
+            return "sequence must be a non-negative integer"
+        event = payload.get("event", "")
+        if not isinstance(event, str) or len(event) > 64:
+            return "event must be a string of at most 64 characters"
+        if not _optional(payload, "delta", str):
+            return "delta must be a string"
+    elif message_type == "session.action_required":
+        if not _is_uuid(payload.get("request_id")):
+            return "request_id must be a UUID"
+        tool_name = payload.get("tool_name")
+        if not isinstance(tool_name, str) or not 0 < len(tool_name) <= 255:
+            return "tool_name must be a non-empty string"
+        if not _optional(payload, "input", dict):
+            return "input must be an object"
+        tool_use_id = payload.get("tool_use_id")
+        if tool_use_id is not None and (
+            not isinstance(tool_use_id, str) or len(tool_use_id) > 255
+        ):
+            return "tool_use_id must be a string"
+        if not _optional(payload, "fingerprint", str):
+            return "fingerprint must be a string"
+    elif message_type == "command.completed":
+        if not _optional(payload, "result", dict):
+            return "result must be an object"
+    elif message_type == "command.failed":
+        if not _optional(payload, "error", str):
+            return "error must be a string"
+        if not _optional(payload, "cancelled", bool):
+            return "cancelled must be a boolean"
+    return None
 
 
 class EventConsumer(AsyncJsonWebsocketConsumer):
@@ -70,6 +191,14 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
     agent: Agent | None = None
     #: Hash of the token this socket authenticated with: a rotation changes it.
     token_hash: str = ""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        #: Fixed one-minute window of the per-socket message rate limit.
+        self._window_started = time.monotonic()
+        self._window_count = 0
+        #: Output characters stored so far per command (progress deltas).
+        self._output_used: dict[str, int] = {}
 
     async def connect(self) -> None:
         agent = await sync_to_async(authenticate_agent)(self.scope)
@@ -108,6 +237,60 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
             )
             await sync_to_async(self._mark_offline)()
 
+    async def receive(
+        self, text_data: str | None = None, bytes_data: bytes | None = None
+    ) -> None:
+        """Bound every frame before it is decoded (M1).
+
+        Size and rate are checked first, then the JSON is parsed here rather than
+        by `AsyncJsonWebsocketConsumer`, whose `json.loads` would raise on a
+        malformed frame and drop the socket with every command in flight.
+        """
+        if self.agent is None:
+            await self.close(code=4401)
+            return
+
+        if not self._within_rate_limit():
+            LOGGER.warning("Agent %s exceeded the message rate limit", self.agent.id)
+            await self.close(code=CLOSE_RATE_LIMITED)
+            return
+
+        raw: str | bytes = text_data if text_data is not None else bytes_data or b""
+        size = len(raw.encode("utf-8")) if isinstance(raw, str) else len(raw)
+        if size > int(settings.FABRIC_AGENT_MAX_MESSAGE_BYTES):
+            LOGGER.warning(
+                "Agent %s sent a %s-byte message: closing", self.agent.id, size
+            )
+            await self.close(code=CLOSE_TOO_BIG)
+            return
+
+        try:
+            content = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            await self._protocol_error("message is not valid JSON")
+            return
+        if not isinstance(content, dict):
+            await self._protocol_error("message must be a JSON object")
+            return
+        await self.receive_json(content)
+
+    def _within_rate_limit(self) -> bool:
+        now = time.monotonic()
+        if now - self._window_started >= 60:
+            self._window_started = now
+            self._window_count = 0
+        self._window_count += 1
+        limit = int(settings.FABRIC_AGENT_MAX_MESSAGES_PER_MINUTE)
+        return self._window_count <= limit
+
+    async def _protocol_error(self, message: str) -> None:
+        await self.send_json(
+            build_message(
+                message_type="error",
+                payload={"code": "protocol_error", "message": message},
+            )
+        )
+
     async def receive_json(self, content: dict[str, object], **kwargs: object) -> None:
         if self.agent is None:
             await self.close(code=4401)
@@ -116,12 +299,11 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         try:
             envelope = parse_message(content)
         except ProtocolValidationError as exc:
-            await self.send_json(
-                build_message(
-                    message_type="error",
-                    payload={"code": "protocol_error", "message": str(exc)},
-                )
-            )
+            await self._protocol_error(str(exc))
+            return
+        error = _payload_error(envelope.type, envelope.payload)
+        if error is not None:
+            await self._protocol_error(error)
             return
 
         # Authentication happened once, at the handshake: re-check on every
@@ -136,8 +318,10 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
             if not await sync_to_async(update_agent_presence)(
                 self.agent,
                 status=AgentStatus.ONLINE,
-                version=str(envelope.payload.get("version", "")),
-                operating_system=str(envelope.payload.get("operating_system", "")),
+                version=str(envelope.payload.get("version") or "")[:64],
+                operating_system=str(
+                    envelope.payload.get("operating_system") or ""
+                )[:128],
             ):
                 await self.close(code=4401)
                 return
@@ -324,13 +508,49 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         command = self._load_command(payload.get("command_id"))
         if command is None:
             return
-        command_event = CommandEvent.objects.create(
-            command=command,
-            sequence=int(str(payload.get("sequence", 0))),
-            event_type=str(payload.get("event", "message.delta")),
-            payload=payload,
+        if command.status not in _ACTIVE_STATUSES:
+            # A finished command takes no more output (late or replayed frame).
+            LOGGER.warning(
+                "Ignoring progress for %s command %s", command.status, command.id
+            )
+            return
+
+        # Cap the output stored per command (I4): once the budget is spent the
+        # last stored event ends with a marker and later ones are dropped.
+        key = str(command.id)
+        used = self._output_used.get(key, 0)
+        budget = output_max_chars() - used
+        if budget <= 0:
+            return
+        envelope_keys = {"command_id", "sequence", "event"}
+        body, spent, _ = cap_strings(
+            {k: v for k, v in payload.items() if k not in envelope_keys}, budget
         )
-        sync_message_for_command_progress(command, str(payload.get("delta", "")))
+        self._output_used[key] = used + max(spent, 1)
+        stored = {
+            **{k: v for k, v in payload.items() if k in envelope_keys},
+            **body,
+        }
+
+        try:
+            with transaction.atomic():
+                command_event = CommandEvent.objects.create(
+                    command=command,
+                    sequence=int(str(payload.get("sequence", 0))),
+                    event_type=str(payload.get("event") or "message.delta"),
+                    payload=stored,
+                )
+        except IntegrityError:
+            LOGGER.warning(
+                "Duplicate progress sequence %s for command %s",
+                payload.get("sequence"),
+                command.id,
+            )
+            return
+        delta = stored.get("delta")
+        sync_message_for_command_progress(
+            command, delta if isinstance(delta, str) else ""
+        )
         publish_command_event(command, command_event)
 
     def _register_permission_request(self, payload: dict[str, object]) -> None:
@@ -346,8 +566,11 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
             defaults={
                 "command": command,
                 "tool_name": str(payload.get("tool_name", "")),
-                "tool_input": payload.get("input") or {},
+                "tool_input": cap_strings(
+                    payload.get("input") or {}, TOOL_INPUT_MAX_CHARS
+                )[0],
                 "tool_use_id": str(payload.get("tool_use_id") or ""),
+                "fingerprint": _fingerprint(payload.get("fingerprint")),
             },
         )
         if not created:
@@ -368,7 +591,10 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         if command is None:
             return
         command.status = CommandStatus.SUCCEEDED
-        command.result = payload.get("result", {})
+        command.result, _, _ = cap_strings(
+            payload.get("result") or {}, output_max_chars()
+        )
+        self._output_used.pop(str(command.id), None)
         command.finished_at = timezone.now()
         command.save(update_fields=["status", "result", "finished_at", "updated_at"])
         Agent.objects.filter(id=command.agent_id).exclude(
@@ -390,7 +616,10 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         if command is None:
             return
         command.status = next_status
-        command.error = str(payload.get("error", "Unknown error"))
+        command.error = cap_text(
+            str(payload.get("error") or "Unknown error"), ERROR_MAX_CHARS
+        )
+        self._output_used.pop(str(command.id), None)
         command.finished_at = timezone.now()
         command.save(update_fields=["status", "error", "finished_at", "updated_at"])
         Agent.objects.filter(id=command.agent_id).exclude(

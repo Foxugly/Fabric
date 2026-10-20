@@ -21,7 +21,9 @@ from apps.api_auth.serializers import (
     PushItTargetSerializer,
     UserSerializer,
 )
+from apps.api_auth.sessions import revoke_refresh_tokens
 from apps.api_auth.throttles import (
+    AccountDeleteRateThrottle,
     LoginRateThrottle,
     LoginUsernameRateThrottle,
     PasswordChangeRateThrottle,
@@ -130,8 +132,47 @@ class TokenRefreshView(APIView):
 
 
 class MeView(APIView):
+    def get_throttles(self) -> list[Any]:
+        if self.request.method == "DELETE":
+            return [AccountDeleteRateThrottle()]
+        return super().get_throttles()
+
     def get(self, request: Request) -> response.Response:
         return response.Response({"user": UserSerializer(request.user).data})
+
+    def delete(self, request: Request) -> response.Response:
+        """Delete your own account and everything it owns (GDPR, §3.25).
+
+        Password-confirmed: a stolen access token alone cannot erase an
+        account. Agents, their commands and outputs, conversations, approvals,
+        notification targets and tickets go with the user (CASCADE); every
+        refresh token is blacklisted first, and the agents' open sockets are
+        closed once the deletion is committed.
+        """
+        if (rejected := refresh_cookie.cookie_origin_guard(request)) is not None:
+            return rejected
+        user: Any = request.user
+        password = str(_request_data(request).get("password") or "")
+        if not password or not user.check_password(password):
+            return _error("password_invalid", "Password is incorrect.")
+
+        from apps.agents.models import Agent
+        from apps.agents.services import disconnect_agent_sockets
+
+        agent_ids = list(Agent.objects.filter(owner=user).values_list("id", flat=True))
+        with transaction.atomic():
+            revoke_refresh_tokens(user.pk)
+            user.delete()
+
+            def close_sockets() -> None:
+                for agent_id in agent_ids:
+                    disconnect_agent_sockets(agent_id)
+
+            transaction.on_commit(close_sockets)
+
+        result = response.Response(status=status.HTTP_204_NO_CONTENT)
+        refresh_cookie.clear_refresh_cookie(result)
+        return result
 
 
 class LogoutView(APIView):

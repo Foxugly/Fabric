@@ -10,6 +10,10 @@ Two rules govern everything here:
 - **A notification must never affect the command it describes.** Every send runs
   on a daemon thread with a short timeout, and failures are logged, never
   raised. PushIT being down must not fail a deploy, a turn, or an approval.
+- **No content leaves Fabric** (I4): a notification names the event, the tool
+  and the status — never a result excerpt, a tool argument or an error text.
+  Those can hold secrets (`Get-Content .env`), and a push lands on a phone
+  lock screen and in PushIT's own database.
 - **Nothing is sent unless explicitly switched on** (`PUSHIT_ENABLED` plus a
   token). A credential lying around is not consent — the same rule that keeps
   dev crashes out of the production Sentry project.
@@ -27,11 +31,26 @@ from typing import Any
 
 from django.conf import settings
 
+from apps.api_auth.pushit_urls import pushit_url_error
 from apps.commands.models import Command, CommandStatus, PermissionRequest
 
 LOGGER = logging.getLogger(__name__)
 
 SEND_PATH = "/api/v1/notifications/app/send/"
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never follow a redirect: the app token must not travel past the
+    allow-listed host (a 3xx surfaces as an HTTPError instead)."""
+
+    def redirect_request(
+        self, *args: Any, **kwargs: Any
+    ) -> urllib.request.Request | None:
+        return None
+
+
+#: HTTPS only, no redirects: the scheme and host are checked before each send.
+_OPENER = urllib.request.build_opener(_NoRedirect)
 MESSAGE_MAX_CHARS = 300
 
 
@@ -85,15 +104,18 @@ def notify_permission_request(
     command: Command,
     request: PermissionRequest,
 ) -> None:
-    """Claude is blocked until a human rules on this tool call."""
-    hint = _tool_hint(request.tool_input)
+    """Claude is blocked until a human rules on this tool call.
+
+    Only the tool's name: its argument (a command line, a path, a URL) stays in
+    Fabric, where the operator reads it before deciding.
+    """
     _send(
         destination=_destination_for(command.requested_by),
         event="permission_request",
         idempotency_key=f"fabric:perm:{request.request_id}",
         title="autorisation demandée",
         message=(
-            f"Claude veut utiliser {request.tool_name}{hint}. "
+            f"Claude veut utiliser {request.tool_name[:64]}. "
             "Répondez allow ou deny dans le terminal."
         ),
     )
@@ -110,10 +132,10 @@ def notify_command_finished(command: Command) -> None:
 
     if command.status == CommandStatus.SUCCEEDED:
         event, title = "claude_turn_completed", "tour terminé"
-        body = _result_excerpt(command) or "Terminé sans texte."
+        body = "Le tour Claude est terminé. Le résultat est dans Fabric."
     else:
         event, title = "claude_turn_failed", f"tour {command.status}"
-        body = command.error or "Sans détail."
+        body = f"Le tour Claude s'est terminé en {command.status}. Détails dans Fabric."
 
     _send(
         destination=_destination_for(command.requested_by),
@@ -170,7 +192,13 @@ def _post(
     idempotency_key: str,
     event: str,
 ) -> None:
-    url = f"{destination.base_url}{SEND_PATH}"
+    error = pushit_url_error(destination.base_url)
+    if error is not None:
+        # Rows saved before the allow-list existed, or a mistyped site setting:
+        # refuse rather than POST the token somewhere unexpected.
+        LOGGER.warning("PushIT %s not sent: %s", event, error)
+        return
+    url = f"{destination.base_url.rstrip('/')}{SEND_PATH}"
     request = urllib.request.Request(
         url,
         data=payload,
@@ -184,7 +212,7 @@ def _post(
         },
     )
     try:
-        with urllib.request.urlopen(
+        with _OPENER.open(
             request, timeout=getattr(settings, "PUSHIT_TIMEOUT_SECONDS", 5)
         ) as response:
             LOGGER.info("PushIT %s -> HTTP %s", event, response.status)
@@ -200,18 +228,3 @@ def _truncate(text: str) -> str:
         return collapsed
     return collapsed[: MESSAGE_MAX_CHARS - 1] + "…"
 
-
-def _result_excerpt(command: Command) -> str:
-    text = command.result.get("text")
-    return _truncate(text) if isinstance(text, str) else ""
-
-
-def _tool_hint(tool_input: Any) -> str:
-    """The argument that makes a permission request decidable at a glance."""
-    if not isinstance(tool_input, dict):
-        return ""
-    for key in ("command", "file_path", "path", "pattern", "url"):
-        value = tool_input.get(key)
-        if isinstance(value, str) and value.strip():
-            return f" — {value.strip().splitlines()[0][:120]}"
-    return ""

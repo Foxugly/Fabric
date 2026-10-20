@@ -105,43 +105,46 @@ class CommandViewSet(viewsets.GenericViewSet[Command]):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        if not permission_request.is_pending:
+        # Atomic decision (M2): the conditional UPDATE is the only gate. Of two
+        # concurrent answers, exactly one flips the row out of `pending`; the
+        # other gets 409 and relays nothing to the agent.
+        allowed = serializer.validated_data["behavior"] == "allow"
+        now = timezone.now()
+        decided = PermissionRequest.objects.filter(
+            pk=permission_request.pk, decision=PermissionDecision.PENDING
+        ).update(
+            decision=(
+                PermissionDecision.ALLOWED if allowed else PermissionDecision.DENIED
+            ),
+            decision_message=serializer.validated_data["message"],
+            decided_by=request.user,
+            decided_at=now,
+        )
+        permission_request.refresh_from_db()
+        if decided != 1:
             return response.Response(
                 {"detail": f"Already {permission_request.decision}."},
                 status=status.HTTP_409_CONFLICT,
             )
-
-        allowed = serializer.validated_data["behavior"] == "allow"
-        permission_request.decision = (
-            PermissionDecision.ALLOWED if allowed else PermissionDecision.DENIED
-        )
-        permission_request.decision_message = serializer.validated_data["message"]
-        permission_request.decided_by = request.user
-        permission_request.decided_at = timezone.now()
-        permission_request.save(
-            update_fields=[
-                "decision",
-                "decision_message",
-                "decided_by",
-                "decided_at",
-            ]
-        )
 
         dispatch_permission_decision(
             command,
             request_id=str(permission_request.request_id),
             allowed=allowed,
             message=permission_request.decision_message,
+            fingerprint=permission_request.fingerprint,
         )
 
         # The agent drives the command back to `running` when the turn resumes;
         # reflecting it here keeps the UI from looking stuck in the meantime.
         # `started_at` restarts too: the operator's thinking time must not eat
-        # into the command's own timeout budget.
-        if command.status == CommandStatus.WAITING_USER_ACTION:
-            command.status = CommandStatus.RUNNING
-            command.started_at = timezone.now()
-            command.save(update_fields=["status", "started_at", "updated_at"])
+        # into the command's own timeout budget. Conditional as well, so a
+        # command that finished in the meantime is never resurrected.
+        resumed = Command.objects.filter(
+            pk=command.pk, status=CommandStatus.WAITING_USER_ACTION
+        ).update(status=CommandStatus.RUNNING, started_at=now, updated_at=now)
+        if resumed:
+            command.refresh_from_db()
             publish_command_updated(command)
 
         return response.Response(PermissionRequestSerializer(permission_request).data)
