@@ -95,6 +95,9 @@ echo "== backend deploy (as django) =="
 sudo -u django bash "$APP_DIR/deploy/ssm-deploy.sh"
 
 echo "== restart =="
+# enable: the unit was disabled while Fabric was stopped (2026-10-09 → 2026-10-20);
+# idempotent, and keeps it up after a reboot.
+systemctl enable --quiet fabric-asgi
 systemctl restart fabric-asgi
 
 # chown BEFORE chmod: stripping o-rwx first would lock django out of files it
