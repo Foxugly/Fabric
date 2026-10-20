@@ -124,6 +124,10 @@ class PermissionRequest(models.Model):
     tool_name = models.CharField(max_length=255)
     tool_input = models.JSONField(default=dict, blank=True)
     tool_use_id = models.CharField(max_length=255, blank=True)
+    #: SHA-256 the agent computed over the exact request (command, tool, input).
+    #: Echoed back with the decision so the agent can check the approval is for
+    #: what it actually asked, not for a look-alike request (A-M5).
+    fingerprint = models.CharField(max_length=64, blank=True)
     decision = models.CharField(
         max_length=16,
         choices=PermissionDecision.choices,

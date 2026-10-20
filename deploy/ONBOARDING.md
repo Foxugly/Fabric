@@ -256,6 +256,8 @@ sudo chown root:root /usr/local/sbin/fabric-env-fetch.sh
 sudo chmod 0755 /usr/local/sbin/fabric-env-fetch.sh
 sudo git show origin/main:deploy/systemd/fabric-env-fetch.service | sudo tee /etc/systemd/system/fabric-env-fetch.service >/dev/null
 sudo git show origin/main:deploy/systemd/fabric-asgi.service | sudo tee /etc/systemd/system/fabric-asgi.service >/dev/null
+sudo git show origin/main:deploy/systemd/fabric-purge.service | sudo tee /etc/systemd/system/fabric-purge.service >/dev/null
+sudo git show origin/main:deploy/systemd/fabric-purge.timer | sudo tee /etc/systemd/system/fabric-purge.timer >/dev/null
 sudo git show origin/main:deploy/sudoers/fabric-deploy | sudo tee /etc/sudoers.d/fabric-deploy >/dev/null
 sudo chown root:root /etc/sudoers.d/fabric-deploy
 sudo chmod 0440 /etc/sudoers.d/fabric-deploy
@@ -265,6 +267,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now fabric-env-fetch
 sudo head -c 40 /run/fabric/.env   # doit montrer des variables, pas une erreur
 sudo systemctl enable fabric-asgi
+sudo systemctl enable --now fabric-purge.timer   # purge quotidienne (FABRIC_RETENTION_DAYS, défaut 30)
 ```
 
 ## 7. Sentry (§3.8)

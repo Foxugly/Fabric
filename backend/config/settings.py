@@ -112,7 +112,10 @@ if _db_engine:
             "PASSWORD": os.environ.get("DB_PASSWORD", ""),
             "HOST": _env("DB_HOST", "127.0.0.1"),
             "PORT": _env("DB_PORT", "5432"),
-            "CONN_MAX_AGE": 60,
+            # 0 under daphne (OPERATIONS.md §3.22): persistent connections are
+            # for gunicorn only. In ASGI every sync_to_async thread would keep
+            # its own connection open, and PostgreSQL runs out of slots.
+            "CONN_MAX_AGE": 0,
         }
     }
 else:
@@ -192,6 +195,7 @@ REST_FRAMEWORK = {
         "login": _env("THROTTLE_LOGIN", "10/hour"),
         "login_username": _env("THROTTLE_LOGIN_USERNAME", "20/hour"),
         "password_change": _env("THROTTLE_PASSWORD_CHANGE", "5/min"),
+        "account_delete": _env("THROTTLE_ACCOUNT_DELETE", "5/min"),
         "ws_ticket": _env("THROTTLE_WS_TICKET", "30/min"),
     },
     # nginx is the single reverse proxy: trust only the last X-Forwarded-For
@@ -280,6 +284,26 @@ LOGGING = {
     },
 }
 
+#: Agent socket limits (M1): a frame above the size closes the socket (1009),
+#: so does a burst above the per-minute message count (1008). Claude streams
+#: one progress frame per delta, hence the generous rate.
+FABRIC_AGENT_MAX_MESSAGE_BYTES = int(
+    _env("FABRIC_AGENT_MAX_MESSAGE_BYTES", str(1024 * 1024))
+)
+FABRIC_AGENT_MAX_MESSAGES_PER_MINUTE = int(
+    _env("FABRIC_AGENT_MAX_MESSAGES_PER_MINUTE", "3000")
+)
+
+#: Output a command may store (progress deltas, then its result), in
+#: characters; beyond it the text is cut and ends with a marker (I4).
+FABRIC_COMMAND_OUTPUT_MAX_CHARS = int(
+    _env("FABRIC_COMMAND_OUTPUT_MAX_CHARS", "200000")
+)
+
+#: Days of command output, events, approvals and messages kept before the daily
+#: purge (`manage.py purge_fabric_history`, systemd fabric-purge.timer).
+FABRIC_RETENTION_DAYS = max(int(_env("FABRIC_RETENTION_DAYS", "30")), 1)
+
 #: A command whose agent never reports back is timed out this long after its own
 #: `timeout_seconds` has elapsed.
 FABRIC_COMMAND_GRACE_SECONDS = int(_env("FABRIC_COMMAND_GRACE_SECONDS", "30"))
@@ -294,6 +318,9 @@ FABRIC_COMMAND_GRACE_SECONDS = int(_env("FABRIC_COMMAND_GRACE_SECONDS", "30"))
 PUSHIT_ENABLED = _env_bool("PUSHIT_ENABLED", False)
 PUSHIT_BASE_URL = _env("PUSHIT_BASE_URL", "https://pushit-api.foxugly.com").rstrip("/")
 PUSHIT_APP_TOKEN = _env("PUSHIT_APP_TOKEN")
+#: The only hosts an app token is ever POSTed to (https only, no redirects):
+#: a target's `base_url` is user input, so anything else is an SSRF (M3).
+PUSHIT_ALLOWED_HOSTS = _env_list("PUSHIT_ALLOWED_HOSTS", "pushit-api.foxugly.com")
 PUSHIT_TIMEOUT_SECONDS = int(_env("PUSHIT_TIMEOUT_SECONDS", "5"))
 
 PUSHIT_DEFAULT_EVENTS = {
@@ -350,10 +377,15 @@ SENTRY_ENABLED = bool(SENTRY_DSN) and (
 if SENTRY_ENABLED:  # pragma: no cover - exercised in production only
     import sentry_sdk
 
+    from config.sentry import init_options
+
+    # No PII, no local variables, no request body, and a `before_send` that
+    # drops tokens, cookies and command output (I4, OPERATIONS.md §3.25).
     sentry_sdk.init(
-        dsn=SENTRY_DSN,
-        environment=_env("SENTRY_ENVIRONMENT", STATE),
-        release=_env("SENTRY_RELEASE") or None,
-        traces_sample_rate=float(_env("SENTRY_TRACES_SAMPLE_RATE", "0")),
-        send_default_pii=False,
+        **init_options(
+            dsn=SENTRY_DSN,
+            environment=_env("SENTRY_ENVIRONMENT", STATE),
+            release=_env("SENTRY_RELEASE") or None,
+            traces_sample_rate=float(_env("SENTRY_TRACES_SAMPLE_RATE", "0")),
+        )
     )
