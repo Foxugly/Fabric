@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fabric_agent.application.config import AgentConfig
 from fabric_agent.application.dispatcher import CommandDispatcher
+from fabric_agent.application.policy import LocalPolicy
 from fabric_agent.application.registry import ProviderRegistry
 from fabric_agent.permissions import PermissionGateway
 from fabric_agent.transport.client import AgentWebSocketClient
@@ -9,6 +10,8 @@ from fabric_agent.transport.client import AgentWebSocketClient
 
 async def run_agent() -> None:
     config = AgentConfig.from_env()
+    # Loaded before anything listens: a broken policy file stops the agent.
+    policy = LocalPolicy.load()
     permission_gateway = PermissionGateway()
     await permission_gateway.start()
 
@@ -22,6 +25,7 @@ async def run_agent() -> None:
             registry,
             dispatcher,
             permission_gateway=permission_gateway,
+            policy=policy,
         )
         await client.run_forever()
     finally:

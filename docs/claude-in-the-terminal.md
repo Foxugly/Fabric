@@ -24,6 +24,10 @@ allow / deny [why]  répond à une demande d'autorisation en attente
 
 Modes de permission acceptés : `default` (défaut — demande via le pont
 d'autorisation), `acceptEdits`, `plan`, `bypassPermissions`, `auto`, `manual`.
+L'agent n'accepte toutefois que `default` et `plan`, sauf si sa politique
+locale (`policy.toml` sur le PC, voir [agent/README.md](../agent/README.md))
+en autorise d'autres. Un mode refusé fait échouer la commande avec un message
+explicite.
 
 ## Continuité de session
 

@@ -14,8 +14,13 @@ from uuid import uuid4
 from shared.protocol import build_message, parse_message
 from websockets.asyncio.client import ClientConnection, connect
 
-from fabric_agent.application.config import AgentConfig
+from fabric_agent.application.config import (
+    AgentConfig,
+    InsecureTransportError,
+    ensure_secure_server_url,
+)
 from fabric_agent.application.dispatcher import CommandDispatcher
+from fabric_agent.application.policy import LocalPolicy, PolicyViolation
 from fabric_agent.application.registry import ProviderRegistry
 from fabric_agent.permissions import (
     PermissionDecision,
@@ -40,6 +45,8 @@ class CommandCancelledError(RuntimeError):
 
 LOGGER = logging.getLogger(__name__)
 
+__all__ = ["AgentWebSocketClient", "InsecureTransportError"]
+
 
 class AgentWebSocketClient:
     def __init__(
@@ -48,8 +55,11 @@ class AgentWebSocketClient:
         registry: ProviderRegistry,
         dispatcher: CommandDispatcher,
         permission_gateway: PermissionGateway | None = None,
+        policy: LocalPolicy | None = None,
     ) -> None:
         self._config = config
+        # Never taken from the server: see `fabric_agent.application.policy`.
+        self._policy = policy or LocalPolicy()
         self._registry = registry
         self._dispatcher = dispatcher
         self._permission_gateway = permission_gateway
@@ -77,11 +87,14 @@ class AgentWebSocketClient:
                 backoff = min(backoff * 2, 15)
 
     async def _run_once(self) -> None:
-        query = urlencode(
-            {"agent_id": self._config.agent_id, "token": self._config.agent_token}
+        ensure_secure_server_url(
+            self._config.server_ws_url,
+            allow_insecure=self._config.allow_insecure_transport,
         )
+        url, headers = _handshake(self._config)
         async with connect(
-            f"{self._config.server_ws_url}?{query}",
+            url,
+            additional_headers=headers,
             ssl=_ssl_context(self._config.server_ws_url),
         ) as websocket:
             self._websocket = websocket
@@ -181,6 +194,29 @@ class AgentWebSocketClient:
         parameters = payload.get("parameters", {})
         if not isinstance(parameters, dict):
             raise ValueError("Command parameters must be a JSON object")
+
+        try:
+            self._policy.authorize(provider_name, action, parameters)
+        except PolicyViolation as exc:
+            # Reported, never silently dropped: the operator must see why.
+            LOGGER.warning(
+                "Refused command %s (%s %s) by local policy: %s",
+                command_id,
+                provider_name,
+                action,
+                exc,
+            )
+            await self._send_message(
+                websocket,
+                "command.failed",
+                correlation_id,
+                {
+                    "command_id": command_id,
+                    "error": f"Refused by the agent's local policy: {exc}",
+                    "policy_refused": True,
+                },
+            )
+            return
 
         execution_parameters = dict(parameters)
         execution_parameters["_fabric_command_id"] = command_id
@@ -321,17 +357,31 @@ class AgentWebSocketClient:
         if self._permission_gateway is None:
             return
         request_id = str(payload.get("request_id", ""))
+        updated_input = payload.get("updated_input")
+        if updated_input is not None and not self._policy.allow_updated_input:
+            # An approval must run the exact input the operator saw.
+            LOGGER.warning(
+                "Ignoring updated_input sent with approval %s: forbidden by the "
+                "local policy",
+                request_id,
+            )
+            updated_input = None
         decision = PermissionDecision(
             allowed=payload.get("behavior") == "allow",
             message=str(payload.get("message", "")),
-            updated_input=(
-                payload["updated_input"]
-                if isinstance(payload.get("updated_input"), dict)
-                else None
-            ),
+            updated_input=updated_input if isinstance(updated_input, dict) else None,
         )
-        if not self._permission_gateway.resolve(request_id, decision):
-            LOGGER.warning("No permission request is waiting for %s", request_id)
+        fingerprint = payload.get("fingerprint")
+        if not self._permission_gateway.resolve(
+            request_id,
+            decision,
+            command_id=str(payload.get("command_id", "")),
+            fingerprint=fingerprint if isinstance(fingerprint, str) else None,
+            require_fingerprint=self._policy.require_approval_fingerprint,
+        ):
+            LOGGER.warning(
+                "Approval %s does not match any pending request", request_id
+            )
 
     async def _cancel_active_command(self, payload: dict[str, Any]) -> None:
         command_id = str(payload["command_id"])
@@ -368,6 +418,13 @@ class AgentWebSocketClient:
                 )
             )
         )
+
+
+def _handshake(config: AgentConfig) -> tuple[str, dict[str, str]]:
+    """The token travels in a header, never in the URL (it ends up in logs)."""
+    separator = "&" if urlparse(config.server_ws_url).query else "?"
+    url = f"{config.server_ws_url}{separator}{urlencode({'agent_id': config.agent_id})}"
+    return url, {"Authorization": f"Bearer {config.agent_token}"}
 
 
 def _ssl_context(server_ws_url: str) -> ssl.SSLContext | None:

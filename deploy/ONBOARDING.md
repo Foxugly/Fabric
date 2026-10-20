@@ -316,6 +316,19 @@ troisième uniquement les grants `fabric-*`, la quatrième daphne.
 
 1. Créer le premier utilisateur : `manage.py createsuperuser` sur la box, puis
    `create_dev_agent --owner <lui>` pour l'agent du PC.
-2. Sur le PC Windows : `FABRIC_SERVER_WS_URL=wss://fabric.foxugly.com/ws/v1/agent/`
-   et faire tourner l'agent en service Windows plutôt que dans une fenêtre `cmd`.
+2. Sur le PC Windows (détail : [agent/README.md](../agent/README.md)) :
+   - `FABRIC_SERVER_WS_URL=wss://fabric.foxugly.com/ws/v1/agent/` et
+     `FABRIC_AGENT_ID` en variables d'environnement **utilisateur** (`setx`).
+     `ws://` est refusé hors `localhost` avec `FABRIC_AGENT_ALLOW_INSECURE=1` ;
+   - le jeton dans `%APPDATA%\fabric-agent\agent-token`, lisible par
+     l'utilisateur seul : `.venv\Scripts\python -m fabric_agent.token_store`.
+     Il part dans l'en-tête `Authorization: Bearer`, plus dans l'URL ;
+   - la politique locale dans `%APPDATA%\fabric-agent\policy.toml`. Sans
+     fichier : PowerShell brut, `bypassPermissions`, `acceptEdits`,
+     `permission_prompt: false` et `network.recover` sont refusés, et chaque
+     outil de Claude demande une approbation. Le serveur ne peut pas relâcher
+     ces garde-fous ;
+   - lancer l'agent par une **tâche planifiée « à l'ouverture de session »** sous
+     le compte de l'utilisateur, pas en service Windows (un service tourne en
+     `LocalSystem` par défaut).
 3. Sentry frontend (§7 ci-dessus).
