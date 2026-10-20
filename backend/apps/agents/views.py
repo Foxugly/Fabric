@@ -30,6 +30,8 @@ class AgentViewSet(viewsets.ModelViewSet[Agent]):
     ) -> response.Response:
         agent = self.get_object()
         token = agent.issue_development_token()
+        # Rotation: a socket opened with the previous token must not survive it.
+        _disconnect_agent_sockets(agent.id)
         return response.Response(
             {"agent_id": str(agent.id), "development_token": token},
             status=status.HTTP_200_OK,
@@ -41,6 +43,7 @@ class AgentViewSet(viewsets.ModelViewSet[Agent]):
         agent.status = AgentStatus.DISABLED
         agent.development_token_hash = ""
         agent.save(update_fields=["status", "development_token_hash", "updated_at"])
+        _disconnect_agent_sockets(agent.id)
         return response.Response({"status": agent.status}, status=status.HTTP_200_OK)
 
 
@@ -48,10 +51,17 @@ def visible_agents_for(user: Any) -> Any:
     """Agents a user may see and drive.
 
     Driving an agent means running code on someone's machine, so this is the
-    authorisation boundary for the whole product. Staff see everything,
-    including ownerless legacy agents; everyone else sees only their own.
+    authorisation boundary for the whole product. Everyone — staff and
+    superusers included — sees only their own agents: an admin flag must not
+    double as root on every registered PC. Ownerless legacy agents are visible
+    to nobody until an owner is assigned (Django admin or shell).
     """
-    agents = Agent.objects.order_by("name")
-    if getattr(user, "is_staff", False):
-        return agents
-    return agents.filter(owner_id=getattr(user, "id", None))
+    return Agent.objects.order_by("name").filter(owner_id=getattr(user, "id", None))
+
+
+def _disconnect_agent_sockets(agent_id: object) -> None:
+    # Imported late: services -> events -> commands.serializers imports this
+    # module for `visible_agents_for`.
+    from apps.agents.services import disconnect_agent_sockets
+
+    disconnect_agent_sockets(agent_id)

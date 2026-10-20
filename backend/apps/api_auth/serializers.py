@@ -12,6 +12,8 @@ from apps.api_auth.models import PushItTarget
 class LoginSerializer(serializers.Serializer[dict[str, Any]]):
     username = serializers.CharField(max_length=150)
     password = serializers.CharField(max_length=128, trim_whitespace=False)
+    #: Cookie mode only: a persistent cookie instead of a browser-session one.
+    remember_me = serializers.BooleanField(required=False, default=False)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         request = self.context.get("request")
@@ -24,6 +26,11 @@ class LoginSerializer(serializers.Serializer[dict[str, Any]]):
             raise serializers.ValidationError("Invalid credentials")
         attrs["user"] = user
         return attrs
+
+
+class PasswordChangeSerializer(serializers.Serializer[dict[str, Any]]):
+    current_password = serializers.CharField(max_length=128, trim_whitespace=False)
+    new_password = serializers.CharField(max_length=128, trim_whitespace=False)
 
 
 class UserSerializer(serializers.ModelSerializer[Any]):

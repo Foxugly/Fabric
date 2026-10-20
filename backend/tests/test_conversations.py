@@ -7,9 +7,9 @@ import pytest
 from asgiref.sync import sync_to_async
 from channels.testing.websocket import WebsocketCommunicator
 from django.contrib.auth import get_user_model
-from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 from shared.protocol import build_message
+from ws_helpers import agent_headers, events_path
 
 from apps.agents.models import Agent
 from apps.commands.models import CommandStatus
@@ -29,8 +29,10 @@ async def _receive_event_type(
 
 
 @pytest.mark.django_db
-def test_conversation_create_and_list(authenticated_api_client: APIClient) -> None:
-    agent = Agent.objects.create(name="agent")
+def test_conversation_create_and_list(
+    authenticated_api_client: APIClient, api_user: Any
+) -> None:
+    agent = Agent.objects.create(name="agent", owner=api_user)
 
     response = authenticated_api_client.post(
         "/api/v1/conversations/",
@@ -64,11 +66,11 @@ async def test_message_create_dispatches_command_and_updates_assistant_message(
         password="conversation-password",
     )
     await Agent.objects.filter(id=agent.id).aupdate(owner=user)
-    user_token = await Token.objects.acreate(user=user)
 
     agent_communicator = WebsocketCommunicator(
         application,
-        f"/ws/v1/agent/?agent_id={agent.id}&token={agent_token}",
+        "/ws/v1/agent/",
+        headers=agent_headers(agent_token),
     )
     connected, _ = await agent_communicator.connect()
     assert connected is True
@@ -83,7 +85,7 @@ async def test_message_create_dispatches_command_and_updates_assistant_message(
 
     event_communicator = WebsocketCommunicator(
         application,
-        f"/ws/v1/events/?token={user_token.key}",
+        await events_path(user),
         # The browser event socket is origin-checked (config/routing.py).
         headers=[(b"origin", b"http://127.0.0.1:4200")],
     )

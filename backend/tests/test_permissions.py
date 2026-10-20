@@ -12,6 +12,7 @@ from channels.testing.websocket import WebsocketCommunicator
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 from shared.protocol import build_message
+from ws_helpers import agent_headers
 
 from apps.agents.models import Agent
 from apps.commands.models import (
@@ -47,7 +48,8 @@ async def test_permission_request_blocks_then_resumes_the_command() -> None:
 
     communicator = WebsocketCommunicator(
         application,
-        f"/ws/v1/agent/?agent_id={agent.id}&token={token}",
+        "/ws/v1/agent/",
+        headers=agent_headers(token),
     )
     connected, _ = await communicator.connect()
     assert connected is True
@@ -148,7 +150,8 @@ async def test_denying_relays_the_reason_to_the_agent() -> None:
 
     communicator = WebsocketCommunicator(
         application,
-        f"/ws/v1/agent/?agent_id={agent.id}&token={token}",
+        "/ws/v1/agent/",
+        headers=agent_headers(token),
     )
     connected, _ = await communicator.connect()
     assert connected is True

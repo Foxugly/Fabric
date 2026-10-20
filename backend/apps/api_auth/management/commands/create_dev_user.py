@@ -13,8 +13,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--staff",
             action="store_true",
-            help="Grant admin rights. Staff users can see and drive EVERY agent, "
-            "so this must stay opt-in.",
+            help="Grant Django admin rights (local development). It gives no "
+            "access to other users' agents: everyone only sees their own.",
         )
 
     def handle(self, *args: object, **options: object) -> None:
@@ -24,8 +24,8 @@ class Command(BaseCommand):
         staff = bool(options["staff"])
 
         user, _ = user_model.objects.get_or_create(username=username)
-        # Only ever escalate on request: silently making every dev user a
-        # superuser would hand them all of the fleet's agents.
+        # Only ever escalate on request: the admin is a powerful tool even
+        # though it no longer widens agent visibility.
         if staff:
             user.is_staff = True
             user.is_superuser = True

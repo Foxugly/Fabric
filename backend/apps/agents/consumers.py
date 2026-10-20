@@ -68,14 +68,24 @@ class EventConsumer(AsyncJsonWebsocketConsumer):
 
 class AgentConsumer(AsyncJsonWebsocketConsumer):
     agent: Agent | None = None
+    #: Hash of the token this socket authenticated with: a rotation changes it.
+    token_hash: str = ""
 
     async def connect(self) -> None:
-        agent = await sync_to_async(authenticate_agent)(self.scope["query_string"])
+        agent = await sync_to_async(authenticate_agent)(self.scope)
         if agent is None:
             await self.close(code=4401)
             return
 
         self.agent = agent
+        self.token_hash = agent.development_token_hash
+        # One live socket per agent: the newest one wins and the previous one
+        # is closed (4409). See `_take_over` for why eviction, not refusal.
+        await sync_to_async(self._take_over)()
+        await self.channel_layer.group_send(
+            f"agent.{agent.id}",
+            {"type": "agent.disconnect", "code": 4409, "except": self.channel_name},
+        )
         await self.channel_layer.group_add(f"agent.{agent.id}", self.channel_name)
         await self.accept()
         await sync_to_async(update_agent_presence)(
@@ -114,16 +124,23 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
             )
             return
 
-        await sync_to_async(self._touch_agent)()
+        # Authentication happened once, at the handshake: re-check on every
+        # message that the token was neither revoked nor rotated and that this
+        # socket was not superseded, in case the close event was lost.
+        if not await sync_to_async(self._touch_agent)():
+            await self.close(code=4401)
+            return
         message_type = envelope.type
 
         if message_type == "agent.hello":
-            await sync_to_async(update_agent_presence)(
+            if not await sync_to_async(update_agent_presence)(
                 self.agent,
                 status=AgentStatus.ONLINE,
                 version=str(envelope.payload.get("version", "")),
                 operating_system=str(envelope.payload.get("operating_system", "")),
-            )
+            ):
+                await self.close(code=4401)
+                return
             await sync_to_async(dispatch_pending_commands)(self.agent)
             return
 
@@ -159,6 +176,12 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         if message_type == "command.failed":
             await sync_to_async(self._mark_command_failed)(envelope.payload)
 
+    async def agent_disconnect(self, event: dict[str, object]) -> None:
+        """Revocation, rotation or takeover by a newer socket: close now."""
+        if event.get("except") == self.channel_name:
+            return
+        await self.close(code=int(str(event.get("code", 4401))))
+
     async def command_request(self, event: dict[str, object]) -> None:
         await self.send_json(event["message"])
 
@@ -168,8 +191,31 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
     async def session_action_response(self, event: dict[str, object]) -> None:
         await self.send_json(event["message"])
 
+    def _take_over(self) -> None:
+        """Make this socket the agent's only live one.
+
+        Eviction rather than refusal: after a network drop the server may not
+        have noticed the old socket is dead yet, and refusing would lock the
+        legitimate agent out until a TCP timeout. A thief racing the real agent
+        gains nothing durable either way — revoking or rotating the token closes
+        every socket. Commands in flight on the previous socket are orphaned:
+        nothing will report on them again, so they fail now rather than after
+        this socket has been handed new work.
+        """
+        if self.agent is None:
+            return
+        Agent.objects.filter(id=self.agent.id).update(active_channel=self.channel_name)
+        self._fail_in_flight_commands(Agent.objects.get(id=self.agent.id))
+
     def _mark_offline(self) -> None:
         if self.agent is None:
+            return
+        # Only the socket that still holds the agent may mark it offline: a
+        # socket evicted by a newer connection must leave that one alone.
+        released = Agent.objects.filter(
+            id=self.agent.id, active_channel=self.channel_name
+        ).update(active_channel="")
+        if not released:
             return
         agent = Agent.objects.get(id=self.agent.id)
         agent.mark_offline()
@@ -201,11 +247,21 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         if in_flight:
             notify_agent_offline(agent, len(in_flight))
 
-    def _touch_agent(self) -> None:
+    def _touch_agent(self) -> bool:
+        """Refresh the agent's activity; False when this socket lost its right."""
         if self.agent is None:
-            return
-        agent = Agent.objects.get(id=self.agent.id)
+            return False
+        agent = Agent.objects.filter(id=self.agent.id).first()
+        if (
+            agent is None
+            or agent.status == AgentStatus.DISABLED
+            or not agent.development_token_hash
+            or agent.development_token_hash != self.token_hash
+            or agent.active_channel != self.channel_name
+        ):
+            return False
         agent.touch()
+        return True
 
     def _set_capabilities(self, capabilities: object) -> None:
         if self.agent is None:
@@ -255,7 +311,9 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         command.status = CommandStatus.RUNNING
         command.started_at = timezone.now()
         command.save(update_fields=["status", "started_at", "updated_at"])
-        Agent.objects.filter(id=command.agent_id).update(status=AgentStatus.BUSY)
+        Agent.objects.filter(id=command.agent_id).exclude(
+            status=AgentStatus.DISABLED
+        ).update(status=AgentStatus.BUSY)
         command.refresh_from_db()
         sync_message_for_command_started(command)
         agent = Agent.objects.get(id=command.agent_id)
@@ -313,7 +371,9 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         command.result = payload.get("result", {})
         command.finished_at = timezone.now()
         command.save(update_fields=["status", "result", "finished_at", "updated_at"])
-        Agent.objects.filter(id=command.agent_id).update(status=AgentStatus.ONLINE)
+        Agent.objects.filter(id=command.agent_id).exclude(
+            status=AgentStatus.DISABLED
+        ).update(status=AgentStatus.ONLINE)
         command.refresh_from_db()
         sync_message_for_command_completed(command)
         agent = Agent.objects.get(id=command.agent_id)
@@ -333,9 +393,9 @@ class AgentConsumer(AsyncJsonWebsocketConsumer):
         command.error = str(payload.get("error", "Unknown error"))
         command.finished_at = timezone.now()
         command.save(update_fields=["status", "error", "finished_at", "updated_at"])
-        Agent.objects.filter(id=command.agent_id).update(
-            status=AgentStatus.ONLINE if is_cancelled else AgentStatus.ERROR
-        )
+        Agent.objects.filter(id=command.agent_id).exclude(
+            status=AgentStatus.DISABLED
+        ).update(status=AgentStatus.ONLINE if is_cancelled else AgentStatus.ERROR)
         command.refresh_from_db()
         sync_message_for_command_failed(command)
         agent = Agent.objects.get(id=command.agent_id)

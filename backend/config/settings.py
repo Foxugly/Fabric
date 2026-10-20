@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import timedelta
 from pathlib import Path
 
+from corsheaders.defaults import default_headers
 from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -54,7 +56,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "corsheaders",
     "rest_framework",
-    "rest_framework.authtoken",
+    "rest_framework_simplejwt.token_blacklist",
     "channels",
     "apps.agents",
     "apps.api_auth",
@@ -163,9 +165,12 @@ else:
     CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
 
 REST_FRAMEWORK = {
+    # SimpleJWT only (OPERATIONS.md §3.25): a short-lived access token kept in
+    # the SPA's memory, the refresh token in an HttpOnly cookie
+    # (apps/api_auth/refresh_cookie.py). No SessionAuthentication: no API view
+    # is reachable through the admin's session cookie, so CSRF never applies.
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "apps.api_auth.authentication.ExpiringTokenAuthentication",
-        "rest_framework.authentication.SessionAuthentication",
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
@@ -173,18 +178,67 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
     ],
-    # Login is the only barrier between the Internet and remote code execution
-    # on the operator's PC, so it is rate limited by IP.
-    "DEFAULT_THROTTLE_CLASSES": [],
+    # Every caller is throttled, signed in or not: a stolen access token must
+    # not be able to queue commands without bound.
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ],
     "DEFAULT_THROTTLE_RATES": {
+        "anon": _env("THROTTLE_ANON", "60/min"),
+        "user": _env("THROTTLE_USER", "300/min"),
+        # Login is the only barrier between the Internet and remote code
+        # execution on the operator's PC: rate limited per IP AND per username.
         "login": _env("THROTTLE_LOGIN", "10/hour"),
+        "login_username": _env("THROTTLE_LOGIN_USERNAME", "20/hour"),
+        "password_change": _env("THROTTLE_PASSWORD_CHANGE", "5/min"),
+        "ws_ticket": _env("THROTTLE_WS_TICKET", "30/min"),
     },
+    # nginx is the single reverse proxy: trust only the last X-Forwarded-For
+    # entry (the peer nginx saw), never what the client put there itself.
+    # Without this DRF keys anonymous throttles on the whole client-controlled
+    # header, and a forged prefix per request defeats the login throttle.
+    "NUM_PROXIES": 1,
+}
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=int(_env("JWT_ACCESS_MINUTES", "15"))),
+    # Sliding window: every refresh rotates the token and blacklists the old
+    # one. Shorter than PushIT's 365 days on purpose — a Fabric session drives
+    # code execution on the operator's PC.
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=int(_env("JWT_REFRESH_DAYS", "7"))),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    "UPDATE_LAST_LOGIN": True,
+    "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
 CORS_ALLOWED_ORIGINS = _env_list(
     "CORS_ALLOWED_ORIGINS",
     "http://127.0.0.1:4200,http://localhost:4200",
 )
+# Credentials (the refresh cookie) are only ever allowed for the explicit list
+# above — never with a wildcard. This list is also the server-side Origin
+# allow-list of cookie mode.
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = False
+if "*" in CORS_ALLOWED_ORIGINS:
+    raise ImproperlyConfigured(
+        "CORS_ALLOWED_ORIGINS must list explicit origins (credentials are allowed)"
+    )
+# `x-auth-mode`: the SPA's opt-in to the HttpOnly refresh cookie.
+CORS_ALLOW_HEADERS = (*default_headers, "sentry-trace", "baggage", "x-auth-mode")
+
+# HttpOnly refresh cookie (web SPA only, opt-in via `X-Auth-Mode: cookie`).
+AUTH_REFRESH_COOKIE_NAME = _env("AUTH_REFRESH_COOKIE_NAME", "fabric_refresh")
+AUTH_REFRESH_COOKIE_PATH = "/api/v1/auth/"
+AUTH_REFRESH_COOKIE_SECURE = _env_bool("AUTH_REFRESH_COOKIE_SECURE", True)
+
+#: Lifetime of the single-use ticket that opens the browser event socket.
+#: Browsers cannot set headers on a WebSocket, so the ticket travels in the
+#: URL; being single-use and short-lived is what keeps it out of harm's way in
+#: access logs.
+FABRIC_WS_TICKET_TTL_SECONDS = min(int(_env("FABRIC_WS_TICKET_TTL_SECONDS", "30")), 30)
 
 #: An agent grants remote code execution on the machine it runs on. Outside debug
 #: Fabric is assumed reachable from the Internet, so transport security is
@@ -229,10 +283,6 @@ LOGGING = {
 #: A command whose agent never reports back is timed out this long after its own
 #: `timeout_seconds` has elapsed.
 FABRIC_COMMAND_GRACE_SECONDS = int(_env("FABRIC_COMMAND_GRACE_SECONDS", "30"))
-
-#: How long an issued API token stays valid. A token is a bearer credential for
-#: an agent that can run code, so it must not live forever.
-FABRIC_TOKEN_TTL_HOURS = int(_env("FABRIC_TOKEN_TTL_HOURS", "168"))
 
 # PushIT notifications — Fabric is meant to be driven while away from the
 # screen, and a turn blocked on an approval is invisible until you look. PushIT

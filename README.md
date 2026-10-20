@@ -53,10 +53,10 @@ Implémenté et vérifié de bout en bout :
 
 > **Sécurité — à lire avant toute exposition.** Un agent donne l'exécution de
 > code arbitraire sur la machine où il tourne. Chaque agent appartient à un
-> utilisateur : lui seul (et les comptes `is_staff`) peut le voir, le piloter et
-> émettre ses tokens. Conséquences concrètes :
+> utilisateur : lui seul peut le voir, le piloter et émettre ses tokens — staff
+> et superusers compris. Conséquences concrètes :
 >
-> - ne donner `--staff` qu'à soi-même : un compte staff voit **tous** les agents ;
+> - l'opérateur de prod est un utilisateur normal ; `/admin/` n'est pas exposé ;
 > - servir Fabric en HTTPS et définir `SECRET_KEY` (obligatoire dès que `DEBUG`
 >   est faux, tout comme `REDIS_URL`) ;
 > - faire tourner l'agent sous un compte Windows non administrateur ;

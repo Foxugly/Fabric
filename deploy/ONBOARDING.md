@@ -53,7 +53,11 @@ put FRONTEND_BASE_URL     https://fabric.foxugly.com
 put LOG_LEVEL             INFO
 put REDIS_URL             redis://127.0.0.1:6379/5
 put THROTTLE_LOGIN        10/hour
-put FABRIC_TOKEN_TTL_HOURS 168
+# Session web : access JWT court (mémoire du SPA) + refresh en cookie HttpOnly.
+# CORS_ALLOWED_ORIGINS ci-dessus est AUSSI la liste d'Origin acceptée par
+# refresh/logout en mode cookie : sans https://fabric.foxugly.com, plus de session.
+put JWT_ACCESS_MINUTES    15
+put JWT_REFRESH_DAYS      7
 
 # DB_* 6-var convention (§3.13)
 put DB_ENGINE postgresql
@@ -314,8 +318,25 @@ troisième uniquement les grants `fabric-*`, la quatrième daphne.
 
 ## Ce qui reste après la mise en ligne
 
-1. Créer le premier utilisateur : `manage.py createsuperuser` sur la box, puis
-   `create_dev_agent --owner <lui>` pour l'agent du PC.
+1. Créer l'opérateur comme **utilisateur normal** — ni superuser ni staff : un
+   compte staff n'a aucun pouvoir de plus sur les agents (chacun ne voit que les
+   siens) et l'admin Django n'est pas exposé (`/admin/` → 404 dans le vhost).
+   Le mot de passe est saisi au prompt, jamais en argument (historique shell).
+   Sur la box (`ssh -t`, utilisateur `django`, dans `backend/`, avec
+   l'environnement de `/run/fabric/.env` chargé comme dans `deploy/ssm-deploy.sh`) :
+
+   ```bash
+   .venv/bin/python manage.py shell -c "from django.contrib.auth import get_user_model as U; U().objects.create_user('<op>')"
+   .venv/bin/python manage.py changepassword <op>   # prompt, rien dans l'historique
+   ```
+
+   Ensuite `create_dev_agent --owner <op>` pour l'agent du PC. Changer le mot de passe révoque toutes les sessions
+   (refresh tokens blacklistés), quel que soit le chemin (API, `changepassword`).
+
+   **Admin Django** : fermé à Internet. L'administration passe par `manage.py`
+   en SSH. Pour un diagnostic ponctuel, un tunnel `ssh -L 8008:127.0.0.1:8008`
+   atteint daphne directement, mais `SECURE_SSL_REDIRECT` et `ALLOWED_HOSTS`
+   s'y appliquent : ce n'est pas un usage courant.
 2. Sur le PC Windows : `FABRIC_SERVER_WS_URL=wss://fabric.foxugly.com/ws/v1/agent/`
    et faire tourner l'agent en service Windows plutôt que dans une fenêtre `cmd`.
 3. Sentry frontend (§7 ci-dessus).
