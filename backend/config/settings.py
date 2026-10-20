@@ -195,6 +195,7 @@ REST_FRAMEWORK = {
         "login": _env("THROTTLE_LOGIN", "10/hour"),
         "login_username": _env("THROTTLE_LOGIN_USERNAME", "20/hour"),
         "password_change": _env("THROTTLE_PASSWORD_CHANGE", "5/min"),
+        "account_delete": _env("THROTTLE_ACCOUNT_DELETE", "5/min"),
         "ws_ticket": _env("THROTTLE_WS_TICKET", "30/min"),
     },
     # nginx is the single reverse proxy: trust only the last X-Forwarded-For
