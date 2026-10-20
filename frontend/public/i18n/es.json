@@ -22,7 +22,9 @@
   "login": {
     "username": "Usuario",
     "password": "Contraseña",
-    "signIn": "Iniciar sesión"
+    "signIn": "Iniciar sesión",
+    "showPassword": "Mostrar contraseña",
+    "hidePassword": "Ocultar contraseña"
   },
   "notifications": {
     "title": "Notificaciones",
