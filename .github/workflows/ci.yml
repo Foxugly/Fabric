@@ -147,3 +147,52 @@ jobs:
       - name: Build
         working-directory: frontend
         run: npx ng build --configuration production
+
+  # Audit des dépendances Python contre la base d'avis PyPI (OSV) : le job échoue
+  # sur toute vulnérabilité connue. Fabric n'a pas de requirements.txt : le backend
+  # et l'agent s'installent depuis pyproject (`pip install -e ".[dev]"`, plages de
+  # versions, comme au déploiement). On audite donc l'ENVIRONNEMENT RÉSOLU de chacun
+  # (dépendances transitives et extra dev compris) dans un venv jetable ; outil épinglé.
+  # Exceptions : .pip-audit-ignore, une ligne « ID AAAA-MM-JJ # raison » ;
+  # une exception expirée fait échouer le job — à réexaminer, pas à oublier.
+  pip-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/pyproject.toml
+            agent/pyproject.toml
+
+      - name: Install pip-audit (version figée)
+        run: python -m pip install pip-audit==2.10.1
+
+      - name: Audit des dépendances
+        run: |
+          ignore=()
+          if [ -f .pip-audit-ignore ]; then
+            today=$(date -u +%F)
+            while read -r id expiry _ || [ -n "$id" ]; do
+              case "$id" in ''|'#'*) continue ;; esac
+              if [[ ! "$expiry" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+                echo "::error::.pip-audit-ignore : date d'expiration manquante pour $id"; exit 1
+              fi
+              if [[ "$expiry" < "$today" ]]; then
+                echo "::error::.pip-audit-ignore : l'exception $id a expiré le $expiry"; exit 1
+              fi
+              ignore+=(--ignore-vuln "$id")
+            done < .pip-audit-ignore
+          fi
+          for projet in backend agent; do
+            echo "::group::pip-audit $projet"
+            python -m venv "/tmp/audit-$projet"
+            "/tmp/audit-$projet/bin/pip" install --quiet -e "./$projet[dev]"
+            pip-audit --progress-spinner off \
+              --path "/tmp/audit-$projet/lib/python3.12/site-packages" "${ignore[@]}"
+            echo "::endgroup::"
+          done
