@@ -19,6 +19,14 @@ ExecStart=/var/www/django_websites/Fabric/backend/.venv/bin/daphne \
     --application-close-timeout 10 \
     --websocket_timeout -1 \
     config.asgi:application
+# Durcissement (modèle Facilitation, OPERATIONS.md §3.22) : pas d'élévation de privilèges,
+# /tmp privé, système en lecture seule (/usr, /boot, /etc) — jamais ProtectSystem=strict.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
 Restart=always
 RestartSec=5
 KillMode=mixed
