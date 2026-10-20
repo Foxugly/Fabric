@@ -372,10 +372,15 @@ SENTRY_ENABLED = bool(SENTRY_DSN) and (
 if SENTRY_ENABLED:  # pragma: no cover - exercised in production only
     import sentry_sdk
 
+    from config.sentry import init_options
+
+    # No PII, no local variables, no request body, and a `before_send` that
+    # drops tokens, cookies and command output (I4, OPERATIONS.md §3.25).
     sentry_sdk.init(
-        dsn=SENTRY_DSN,
-        environment=_env("SENTRY_ENVIRONMENT", STATE),
-        release=_env("SENTRY_RELEASE") or None,
-        traces_sample_rate=float(_env("SENTRY_TRACES_SAMPLE_RATE", "0")),
-        send_default_pii=False,
+        **init_options(
+            dsn=SENTRY_DSN,
+            environment=_env("SENTRY_ENVIRONMENT", STATE),
+            release=_env("SENTRY_RELEASE") or None,
+            traces_sample_rate=float(_env("SENTRY_TRACES_SAMPLE_RATE", "0")),
+        )
     )
