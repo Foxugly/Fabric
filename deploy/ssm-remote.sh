@@ -77,10 +77,14 @@ else
 fi
 
 echo "== unpack the SPA =="
+# Root only downloads (instance role) into its private mktemp -d (700); DJANGO
+# extracts, reading the bundle on stdin (redirection opened by root). Root never
+# writes into the django-owned tree, where django could plant a symlink to
+# redirect a root write to /etc (§3.10).
 TMP=$(mktemp -d)
 aws s3 cp "$BUNDLE" "$TMP/spa.tar.gz"
 sudo -u django mkdir -p "$SPA_DIR"
-tar -xzf "$TMP/spa.tar.gz" -C "$SPA_DIR" --no-same-owner
+sudo -u django tar -xzf - -C "$SPA_DIR" --no-same-owner --no-overwrite-dir < "$TMP/spa.tar.gz"
 rm -rf "$TMP"
 
 # Frontend Sentry config, substituted into index.html from the SSM-fetched env.
@@ -93,8 +97,9 @@ if [ -r /run/fabric/.env ]; then
     ENVN=$(sed -n 's/^SENTRY_FRONTEND_ENV=//p' /run/fabric/.env | head -1)
     if [ -n "$DSN" ]; then
         echo "== inject frontend Sentry config =="
-        # `|` as the sed delimiter: a DSN is full of slashes.
-        sed -i \
+        # `|` as the sed delimiter: a DSN is full of slashes. Run AS DJANGO: the
+        # file sits in django's tree (sed -i as root could follow a planted link).
+        sudo -u django sed -i \
             -e "s|__FABRIC_SENTRY_FRONTEND_DSN__|${DSN}|g" \
             -e "s|__FABRIC_SENTRY_FRONTEND_ENV__|${ENVN:-PROD}|g" \
             -e "s|__FABRIC_SENTRY_FRONTEND_RELEASE__|__SHA__|g" \
@@ -118,8 +123,9 @@ systemctl enable --now fabric-purge.timer
 # chown BEFORE chmod: stripping o-rwx first would lock django out of files it
 # does not yet own (§3.1).
 echo "== normalize perms =="
-chown -R django:www-data "$APP_DIR"
-chmod -R g-w,o-rwx "$APP_DIR"
+# -h: never follow a symlink django may have planted; chmod runs AS DJANGO.
+chown -R -h django:www-data "$APP_DIR"
+sudo -u django chmod -R g-w,o-rwx "$APP_DIR"
 
 echo "== health =="
 sleep 5
