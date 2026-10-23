@@ -13,6 +13,7 @@ from fabric_agent.providers.claude_code_local.executor import (
     build_result_payload,
 )
 from fabric_agent.providers.claude_code_local.runner import (
+    ClaudeCodeExecutionRequest,
     ClaudeCodeExecutionResult,
     StreamChunk,
     StreamDeltaEvent,
@@ -106,6 +107,17 @@ def test_message_executor_maps_claude_cli_options() -> None:
     assert request.model == "sonnet"
     assert request.allowed_tools == ("Bash(git *)", "Edit")
     assert request.timeout_seconds == 900
+
+
+def test_message_executor_defaults_to_a_20_minute_turn() -> None:
+    executor = ClaudeCodeMessageExecutor(
+        installation_probe=StubInstallationProbe(Path("C:/Tools/claude.exe"))
+    )
+
+    request = executor._build_request({"text": "ship it"})
+
+    assert request.timeout_seconds == 1200
+    assert ClaudeCodeExecutionRequest(prompt="x").timeout_seconds == 1200
 
 
 def test_build_result_payload_sanitizes_metadata() -> None:

@@ -25,12 +25,21 @@ claude:off          retour à PowerShell
 allow / deny [why]  répond à une demande d'autorisation en attente
 ```
 
-Modes de permission acceptés : `default` (défaut — demande via le pont
-d'autorisation), `acceptEdits`, `plan`, `bypassPermissions`, `auto`, `manual`.
-L'agent n'accepte toutefois que `default` et `plan`, sauf si sa politique
-locale (`policy.toml` sur le PC, voir [agent/README.md](../agent/README.md))
-en autorise d'autres. Un mode refusé fait échouer la commande avec un message
-explicite.
+Modes de permission acceptés : `bypassPermissions` (défaut — aucun outil
+ne demande d'autorisation), `default` (demande via le pont d'autorisation),
+`acceptEdits`, `plan`, `auto`, `manual`. L'agent n'accepte toutefois que
+`default` et `plan`, sauf si sa politique locale (`policy.toml` sur le PC, voir
+[agent/README.md](../agent/README.md)) en autorise d'autres. Un mode refusé fait
+échouer la commande ; le terminal rappelle alors la ligne à ajouter dans
+`policy.toml` et l'alternative `claude:mode default`.
+
+Pour autoriser le mode par défaut, sur le PC, dans
+`%APPDATA%\fabric-agent\policy.toml`, puis relancer l'agent :
+
+```toml
+[claude_code_local]
+allowed_permission_modes = ["default", "plan", "bypassPermissions"]
+```
 
 ## Mode Claude (`claude:on`)
 
@@ -60,8 +69,9 @@ change de projet.
 
 ## Autorisations
 
-Le mode par défaut est `default` : Claude **demande** avant d'utiliser un outil,
-et la question remonte dans le terminal.
+Le mode par défaut est `bypassPermissions` : Claude utilise ses outils sans
+rien demander. Avec `claude:mode default`, Claude **demande** avant d'utiliser
+un outil, et la question remonte dans le terminal.
 
 ```text
 [?] Claude requests permission: Write — C:\Projects\demo\hello.txt
@@ -128,4 +138,5 @@ n'a aucune cible.
   la question comme réponse ; il faut répondre par un nouveau `claude <réponse>`.
 - Pas de reprise après rechargement **pendant** qu'un tour est en cours côté
   Claude : seul l'état PowerShell est resynchronisé au retour.
-- Le timeout par tour est de 600 s côté UI (plafond 3600 s côté agent).
+- Le timeout par tour est de 1200 s (20 min), envoyé par le terminal et par
+  l'API des conversations ; plafond 3600 s côté agent.

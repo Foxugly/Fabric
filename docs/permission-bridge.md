@@ -46,8 +46,9 @@ processus `claude` attend la réponse de son outil MCP.
 
 ## Utilisation
 
-Le mode de permission par défaut du terminal est `default`, c'est-à-dire :
-demander. Quand Claude a besoin d'un outil, le terminal affiche
+Le mode de permission par défaut du terminal est `bypassPermissions` : le pont
+n'intervient pas. Il sert dès que le mode est `default` (`claude:mode default`),
+c'est-à-dire : demander. Quand Claude a besoin d'un outil, le terminal affiche
 
 ```text
 [?] Claude requests permission: Write — C:\Projects\demo\hello.txt
@@ -85,7 +86,7 @@ attente (`fail_pending`).
 ## Limites connues
 
 - Le `timeout_seconds` du tour couvre **à la fois** le travail de Claude et le
-  temps de réflexion humain. Le terminal envoie 600 s ; au-delà, le tour échoue.
+  temps de réflexion humain. Le terminal envoie 1200 s ; au-delà, le tour échoue.
   Côté serveur, `started_at` est réinitialisé à la réponse pour que le reaper ne
   compte pas l'attente, mais le processus `claude`, lui, garde son échéance.
 - Une commande en `waiting_user_action` n'est jamais expirée par le temps : elle

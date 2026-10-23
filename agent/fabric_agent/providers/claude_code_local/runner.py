@@ -69,7 +69,7 @@ class ClaudeCodeExecutionRequest:
     prompt: str
     session_id: str | None = None
     working_directory: Path | None = None
-    timeout_seconds: int = 300
+    timeout_seconds: int = 1200
     permission_mode: str | None = None
     model: str | None = None
     allowed_tools: tuple[str, ...] = field(default_factory=tuple)

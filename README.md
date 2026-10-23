@@ -66,11 +66,12 @@ Implémenté et vérifié de bout en bout :
 >   par défaut, PowerShell brut, `network.recover`, `bypassPermissions`,
 >   `acceptEdits` et la désactivation du pont d'approbation sont refusés, quoi
 >   que demande le serveur ;
-> - Claude demande une autorisation avant chaque outil et la question remonte
->   dans le terminal (`allow` / `deny [raison]`) — voir
->   [docs/permission-bridge.md](docs/permission-bridge.md).
->   `claude:mode acceptEdits` supprime ces demandes. L'agent le refuse tant
->   que la politique locale ne l'autorise pas.
+>   Le terminal envoie par défaut `bypassPermissions` : l'agent refuse ces
+>   tours tant que `policy.toml` ne liste pas ce mode dans
+>   `allowed_permission_modes` ;
+> - avec `claude:mode default`, Claude demande une autorisation avant chaque
+>   outil et la question remonte dans le terminal (`allow` / `deny [raison]`) —
+>   voir [docs/permission-bridge.md](docs/permission-bridge.md).
 >
 > Détail complet : [docs/audit-2026-07-29.md](docs/audit-2026-07-29.md).
 

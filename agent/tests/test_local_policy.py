@@ -141,3 +141,25 @@ def test_policy_path_is_overridable(
     monkeypatch.delenv("FABRIC_AGENT_POLICY_FILE")
     monkeypatch.setenv("APPDATA", str(tmp_path))
     assert default_policy_path() == tmp_path / "fabric-agent" / "policy.toml"
+
+
+def test_refused_permission_mode_message_is_what_the_terminal_explains() -> None:
+    # frontend/src/app/claude-settings.ts matches this wording to tell the
+    # operator how to allow the mode in policy.toml: keep them in sync.
+    with pytest.raises(
+        PolicyViolation,
+        match=r"^permission_mode 'bypassPermissions' is not allowed on this PC "
+        r"\(allowed: default, plan\)$",
+    ):
+        LocalPolicy().authorize(*_claude(permission_mode="bypassPermissions"))
+
+
+def test_policy_file_can_allow_bypass_permissions(tmp_path: Path) -> None:
+    path = tmp_path / "policy.toml"
+    path.write_text(
+        '[claude_code_local]\n'
+        'allowed_permission_modes = ["default", "plan", "bypassPermissions"]\n',
+        encoding="utf-8",
+    )
+
+    LocalPolicy.load(path).authorize(*_claude(permission_mode="bypassPermissions"))

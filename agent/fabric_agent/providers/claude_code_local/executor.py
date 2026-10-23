@@ -23,7 +23,9 @@ from fabric_agent.providers.claude_code_local.runner import (
 
 COMMAND_ID_KEY = "_fabric_command_id"
 TIMEOUT_KEY = "_fabric_timeout_seconds"
-DEFAULT_TIMEOUT_SECONDS = 300
+#: Only a fallback: Fabric always sends the command's own `timeout_seconds`
+#: (1200 s for a Claude turn, set by the server and the web terminal).
+DEFAULT_TIMEOUT_SECONDS = 1200
 MAX_TIMEOUT_SECONDS = 3600
 
 

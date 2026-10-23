@@ -23,6 +23,12 @@ import { CommandService } from './services/command.service';
 import { EventStreamService } from './services/event-stream.service';
 import { RuntimeErrorService } from './services/runtime-error.service';
 import { routeTerminalLine } from './terminal-routing';
+import {
+  CLAUDE_PERMISSION_MODES,
+  CLAUDE_TIMEOUT_SECONDS,
+  DEFAULT_CLAUDE_PERMISSION_MODE,
+  explainClaudeFailure,
+} from './claude-settings';
 import { TranslocoPipe } from '@jsverse/transloco';
 import { LanguageSwitcherComponent } from './i18n/language-switcher.component';
 
@@ -43,11 +49,10 @@ const TERMINAL_OUTPUT_TRIM_MARKER = '[output trimmed]\n';
 
 const CLAUDE_PROVIDER = 'claude_code_local';
 const POWERSHELL_PROVIDER = 'windows_powershell';
-const CLAUDE_TIMEOUT_SECONDS = 600;
-const CLAUDE_PERMISSION_MODES = new Set(['acceptEdits', 'auto', 'bypassPermissions', 'manual', 'plan', 'default']);
-// `default` routes every approval through Fabric's permission bridge instead of
-// granting them up front. Switch to `acceptEdits` to stop being asked.
-const DEFAULT_CLAUDE_PERMISSION_MODE = 'default';
+// Key of the permission mode in the persisted terminal state. Renamed when the
+// default became `bypassPermissions`: the old key held the previous default
+// (`default`), written on every save, so it is not a choice to carry over.
+const CLAUDE_PERMISSION_MODE_STATE_KEY = 'claudePermissionModeChoice';
 
 interface PendingPermission {
   requestId: string;
@@ -1746,13 +1751,20 @@ export class AppComponent implements OnDestroy {
     }
   }
 
+  private commandFailureText(command: Command): string {
+    if (!command.error) {
+      return `Command ${command.status}`;
+    }
+    return command.provider === CLAUDE_PROVIDER ? explainClaudeFailure(command.error) : command.error;
+  }
+
   private renderTerminalCompletion(command: Command): void {
     if (command.status === 'cancelled') {
       this.appendTerminalLine('^C');
       return;
     }
     if (command.status === 'failed' || command.status === 'timed_out') {
-      this.appendTerminalLine(command.error || `Command ${command.status}`);
+      this.appendTerminalLine(this.commandFailureText(command));
       return;
     }
 
@@ -1766,7 +1778,7 @@ export class AppComponent implements OnDestroy {
 
   private renderTerminalResult(command: Command): void {
     if (command.status !== 'succeeded') {
-      this.terminalService.sendResponse(command.error || `Command ${command.status}`);
+      this.terminalService.sendResponse(this.commandFailureText(command));
       return;
     }
 
@@ -1828,11 +1840,9 @@ export class AppComponent implements OnDestroy {
       if (typeof parsed['claudeSessionId'] === 'string') {
         this.claudeSessionId.set(parsed['claudeSessionId']);
       }
-      if (
-        typeof parsed['claudePermissionMode'] === 'string' &&
-        CLAUDE_PERMISSION_MODES.has(parsed['claudePermissionMode'])
-      ) {
-        this.claudePermissionMode.set(parsed['claudePermissionMode']);
+      const storedMode = parsed[CLAUDE_PERMISSION_MODE_STATE_KEY];
+      if (typeof storedMode === 'string' && CLAUDE_PERMISSION_MODES.has(storedMode)) {
+        this.claudePermissionMode.set(storedMode);
       }
       if (parsed['claudeMode'] === true) {
         this.claudeMode.set(true);
@@ -1856,7 +1866,7 @@ export class AppComponent implements OnDestroy {
           activeCommandId: this.activeCommandId(),
           workingDirectory: this.workingDirectory(),
           claudeSessionId: this.claudeSessionId(),
-          claudePermissionMode: this.claudePermissionMode(),
+          [CLAUDE_PERMISSION_MODE_STATE_KEY]: this.claudePermissionMode(),
           claudeMode: this.claudeMode(),
         }),
       );
