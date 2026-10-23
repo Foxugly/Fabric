@@ -7,6 +7,7 @@ and unauthenticated, but it never leaks anything beyond component status.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from typing import Any
 
@@ -16,6 +17,13 @@ from django.db import connection
 from django.http import HttpRequest, JsonResponse
 
 CHANNEL_LAYER_TIMEOUT_SECONDS = 3
+
+LOGGER = logging.getLogger("apps.health")
+
+#: The only value a failed check ever reports. Exception class names and
+#: messages stay in the server log: an unauthenticated probe must not learn
+#: which driver, host or library failed.
+CHECK_ERROR = "error"
 
 
 def health(request: HttpRequest) -> JsonResponse:
@@ -36,8 +44,9 @@ def _check_database() -> str:
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
             cursor.fetchone()
-    except Exception as exc:  # noqa: BLE001 - reported, never raised
-        return f"error: {exc.__class__.__name__}"
+    except Exception:  # noqa: BLE001 - logged, never raised nor exposed
+        LOGGER.exception("health: database check failed")
+        return CHECK_ERROR
     return "ok"
 
 
@@ -51,12 +60,15 @@ def _check_channel_layer() -> str:
     try:
         channel_layer = get_channel_layer()
         if channel_layer is None:
-            return "error: not configured"
+            LOGGER.error("health: no channel layer configured")
+            return CHECK_ERROR
         async_to_sync(_round_trip)(channel_layer)
     except TimeoutError:
-        return "error: timeout"
-    except Exception as exc:  # noqa: BLE001 - reported, never raised
-        return f"error: {exc.__class__.__name__}"
+        LOGGER.error("health: channel layer round trip timed out")
+        return CHECK_ERROR
+    except Exception:  # noqa: BLE001 - logged, never raised nor exposed
+        LOGGER.exception("health: channel layer check failed")
+        return CHECK_ERROR
     return "ok"
 
 

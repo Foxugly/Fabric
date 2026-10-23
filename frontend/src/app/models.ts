@@ -129,10 +129,12 @@ export interface FabricUser {
   username: string;
   is_staff: boolean;
   is_superuser: boolean;
+  /** Always true once signed in: the second factor is mandatory. */
+  mfa_enabled?: boolean;
 }
 
+/** The signed-in user. The access token lives in AuthService's memory only. */
 export interface AuthSession {
-  token: string;
   user: FabricUser;
 }
 

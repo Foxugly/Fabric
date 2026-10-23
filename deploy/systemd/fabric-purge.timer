@@ -1,0 +1,13 @@
+[Unit]
+Description=Fabric — run the retention purge daily
+
+[Timer]
+# After the fleet's Sunday backup window (02:00 dump, 02:30 snapshot).
+OnCalendar=*-*-* 03:15:00 UTC
+RandomizedDelaySec=10min
+# A run missed while the box was down happens at the next boot.
+Persistent=true
+Unit=fabric-purge.service
+
+[Install]
+WantedBy=timers.target

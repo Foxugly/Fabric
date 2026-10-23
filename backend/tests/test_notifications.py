@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import threading
-import urllib.request
 from typing import Any
 from unittest.mock import patch
 from uuid import uuid4
@@ -38,6 +37,7 @@ def active(settings: Any) -> None:
     settings.PUSHIT_ENABLED = True
     settings.PUSHIT_APP_TOKEN = TOKEN
     settings.PUSHIT_BASE_URL = "https://pushit-api.example.com"
+    settings.PUSHIT_ALLOWED_HOSTS = ["pushit-api.example.com"]
     settings.PUSHIT_ACTIVE = True
     settings.PUSHIT_TIMEOUT_SECONDS = 5
     settings.PUSHIT_EVENTS = {
@@ -83,10 +83,10 @@ def test_an_event_switched_off_sends_nothing(
 
 
 @pytest.mark.django_db
-def test_permission_request_carries_the_decidable_detail(
+def test_permission_request_names_the_tool_but_not_its_argument(
     command: Command, active: None
 ) -> None:
-    """A notification you cannot act on is worthless: it must name the tool."""
+    """It must name the tool; the argument may hold a secret and stays (I4)."""
     with patch.object(notifications, "_post") as post:
         request = _permission(command)
         notifications.notify_permission_request(command, request)
@@ -97,7 +97,7 @@ def test_permission_request_carries_the_decidable_detail(
     assert body["title"].startswith("Fabric — ")
     assert key == f"fabric:perm:{request.request_id}"
     assert "Bash" in body["message"]
-    assert "git push --force" in body["message"]
+    assert "git push" not in body["message"]
 
 
 @pytest.mark.django_db
@@ -114,7 +114,7 @@ def test_powershell_commands_do_not_notify(command: Command, active: None) -> No
 
 
 @pytest.mark.django_db
-def test_a_finished_claude_turn_notifies_with_an_excerpt(
+def test_a_finished_claude_turn_notifies_without_any_excerpt(
     command: Command, active: None
 ) -> None:
     command.status = CommandStatus.SUCCEEDED
@@ -128,11 +128,14 @@ def test_a_finished_claude_turn_notifies_with_an_excerpt(
     body = json.loads(payload.decode("utf-8"))
     assert event == "claude_turn_completed"
     assert key.endswith(f":{CommandStatus.SUCCEEDED}")
-    assert "origin/main" in body["message"]
+    assert "origin/main" not in body["message"]
+    assert "terminé" in body["message"]
 
 
 @pytest.mark.django_db
-def test_a_failed_turn_reports_the_error(command: Command, active: None) -> None:
+def test_a_failed_turn_reports_the_status_not_the_error(
+    command: Command, active: None
+) -> None:
     command.status = CommandStatus.FAILED
     command.error = "Claude Code CLI timed out"
     command.save(update_fields=["status", "error"])
@@ -142,21 +145,24 @@ def test_a_failed_turn_reports_the_error(command: Command, active: None) -> None
 
     _destination, payload, _, event = post.call_args[0]
     assert event == "claude_turn_failed"
-    assert "timed out" in json.loads(payload.decode("utf-8"))["message"]
+    message = json.loads(payload.decode("utf-8"))["message"]
+    assert "timed out" not in message
+    assert CommandStatus.FAILED in message
 
 
 @pytest.mark.django_db
 def test_long_messages_are_truncated(command: Command, active: None) -> None:
-    command.status = CommandStatus.SUCCEEDED
-    command.result = {"text": "x" * 5000}
-    command.save(update_fields=["status", "result"])
+    request = _permission(command, tool_name="T" * 255)
 
     with patch.object(notifications, "_post") as post:
-        notifications.notify_command_finished(command)
+        notifications.notify_permission_request(command, request)
 
     body = json.loads(post.call_args[0][1].decode("utf-8"))
-    assert len(body["message"]) <= notifications.MESSAGE_MAX_CHARS
-    assert body["message"].endswith("…")
+    assert "T" * 64 in body["message"]
+    assert "T" * 65 not in body["message"]
+    truncated = notifications._truncate("x" * 5000)
+    assert len(truncated) <= notifications.MESSAGE_MAX_CHARS
+    assert truncated.endswith("…")
 
 
 @pytest.mark.django_db
@@ -167,7 +173,9 @@ def test_pushit_being_down_never_breaks_the_caller(
     command.status = CommandStatus.SUCCEEDED
     command.save(update_fields=["status"])
 
-    with patch.object(urllib.request, "urlopen", side_effect=OSError("network down")):
+    with patch.object(
+        notifications._OPENER, "open", side_effect=OSError("network down")
+    ):
         notifications.notify_command_finished(command)
         # `_post` runs on a daemon thread; drain it so the failure would surface
         # here if it were ever allowed to propagate.

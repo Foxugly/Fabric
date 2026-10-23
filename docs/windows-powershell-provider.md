@@ -190,11 +190,12 @@ machine, and secure it accordingly:
 - the Fabric API is the authorisation boundary — anyone who can drive an agent
   owns the machine it runs on;
 - an agent belongs to a user: only its owner may see it, drive it or mint its
-  tokens. **Staff accounts bypass this and see every agent**, so grant
-  `is_staff` to yourself only;
+  tokens — staff and superusers included;
 - run the agent as an unprivileged Windows account, never as an administrator;
-- the agent's development token is a bearer credential; rotate it with
-  `POST /api/v1/agents/<id>/development-token` and revoke with `.../revoke`;
+- the agent's development token is a bearer credential, sent in the
+  `Authorization: Bearer` handshake header (never in the URL); rotate it with
+  `POST /api/v1/agents/<id>/development-token` and revoke with `.../revoke` —
+  both close the agent's open socket at once;
 - serve Fabric over HTTPS. With `DEBUG` off the backend refuses to start without
   `SECRET_KEY` and `REDIS_URL`, and enables HSTS, secure cookies and an HTTPS
   redirect.

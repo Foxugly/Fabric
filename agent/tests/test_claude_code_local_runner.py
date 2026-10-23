@@ -13,6 +13,7 @@ from fabric_agent.providers.claude_code_local.runner import (
     ClaudeCodeCliRunner,
     ClaudeCodeExecutionRequest,
     ClaudeCodeExecutionResult,
+    PermissionPrompt,
     StreamDeltaEvent,
     _extract_progress,
     _extract_result_text,
@@ -43,6 +44,7 @@ def test_build_json_command_with_resume() -> None:
         "json",
         "--resume",
         "session-123",
+        "--",
         "Summarize this project",
     ]
 
@@ -61,6 +63,7 @@ def test_build_stream_command_without_resume() -> None:
         "stream-json",
         "--verbose",
         "--include-partial-messages",
+        "--",
         "Explain recursion",
     ]
 
@@ -137,7 +140,7 @@ async def test_stream_emits_deltas_incrementally_then_the_result(
         },
         {"type": "result", "result": "Hello world", "session_id": "session-abc"},
     ]
-    runner = ClaudeCodeCliRunner(_fake_cli(tmp_path, events))
+    runner = _fake_cli(tmp_path, events)
 
     chunks = [
         chunk
@@ -158,7 +161,7 @@ async def test_stream_emits_deltas_incrementally_then_the_result(
 
 @pytest.mark.asyncio
 async def test_stream_fails_when_the_cli_never_emits_a_result(tmp_path: Path) -> None:
-    runner = ClaudeCodeCliRunner(_fake_cli(tmp_path, [{"type": "system"}]))
+    runner = _fake_cli(tmp_path, [{"type": "system"}])
 
     with pytest.raises(ClaudeCodeCliError):
         async for _ in runner.stream(
@@ -167,15 +170,94 @@ async def test_stream_fails_when_the_cli_never_emits_a_result(tmp_path: Path) ->
             pass
 
 
-def _fake_cli(tmp_path: Path, events: list[Any]) -> Path:
-    """A stand-in `claude` executable that replays stream-json lines."""
+def test_a_prompt_starting_with_a_dash_stays_a_prompt() -> None:
+    runner = ClaudeCodeCliRunner(CLAUDE_PATH)
+
+    args = runner._build_json_command(
+        ClaudeCodeExecutionRequest(
+            prompt="--dangerously-skip-permissions do it",
+            allowed_tools=("Read",),
+        )
+    )
+
+    assert args[-2:] == ["--", "--dangerously-skip-permissions do it"]
+    assert args.index("--") > args.index("--allowed-tools")
+
+
+@pytest.mark.parametrize("name", ["claude.cmd", "CLAUDE.CMD", "claude.bat"])
+def test_batch_launchers_are_refused(name: str) -> None:
+    with pytest.raises(ClaudeCodeCliError, match="cmd.exe"):
+        ClaudeCodeCliRunner(Path("C:/npm") / name)
+
+
+@pytest.mark.asyncio
+async def test_gateway_token_never_reaches_the_command_line(tmp_path: Path) -> None:
+    argv_log = tmp_path / "argv.json"
+    runner = _fake_cli(
+        tmp_path,
+        [{"type": "result", "result": "ok", "session_id": "s"}],
+        argv_log=argv_log,
+    )
+    secret = "gateway-secret-token"
+    request = ClaudeCodeExecutionRequest(
+        prompt="hi",
+        timeout_seconds=30,
+        permission_prompt=PermissionPrompt(port=1234, token=secret, command_id="c1"),
+    )
+
+    chunks = [chunk async for chunk in runner.stream(request)]
+
+    assert isinstance(chunks[-1], ClaudeCodeExecutionResult)
+    seen = json.loads(argv_log.read_text())
+    assert all(secret not in arg for arg in seen["argv"])
+    config_path = Path(seen["argv"][seen["argv"].index("--mcp-config") + 1])
+    # The CLI read the token from the private file, which is gone afterwards.
+    assert secret in seen["mcp_config"]
+    assert not config_path.exists()
+
+
+class _ScriptRunner(ClaudeCodeCliRunner):
+    """Runs a Python stand-in for `claude` with the exact argv Fabric builds."""
+
+    def __init__(self, script: Path) -> None:
+        super().__init__(CLAUDE_PATH)
+        self._script = script
+
+    def _build_stream_command(
+        self,
+        request: ClaudeCodeExecutionRequest,
+        mcp_config: Path | None = None,
+    ) -> list[str]:
+        args = super()._build_stream_command(request, mcp_config)
+        return [sys.executable, str(self._script), *args[1:]]
+
+
+def _fake_cli(
+    tmp_path: Path, events: list[Any], argv_log: Path | None = None
+) -> ClaudeCodeCliRunner:
+    """A stand-in `claude` that replays stream-json lines.
+
+    With `argv_log`, it also records its argv and the content of the file passed
+    to `--mcp-config`, as seen while it runs.
+    """
     lines = [json.dumps(event) for event in events]
     script = tmp_path / "fake_claude.py"
     script.write_text(
         textwrap.dedent(
             f"""
+            import json
             import sys
             import time
+
+            argv_log = {str(argv_log) if argv_log else None!r}
+            if argv_log:
+                args = sys.argv[1:]
+                config = None
+                if "--mcp-config" in args:
+                    with open(args[args.index("--mcp-config") + 1]) as handle:
+                        config = handle.read()
+                with open(argv_log, "w") as handle:
+                    json.dump({{"argv": args, "mcp_config": config}}, handle)
 
             for line in {lines!r}:
                 sys.stdout.write(line + "\\n")
@@ -185,11 +267,4 @@ def _fake_cli(tmp_path: Path, events: list[Any]) -> Path:
         ),
         encoding="utf-8",
     )
-
-    shim = tmp_path / ("claude.cmd" if sys.platform == "win32" else "claude.sh")
-    if sys.platform == "win32":
-        shim.write_text(f'@echo off\r\n"{sys.executable}" "{script}"\r\n')
-    else:
-        shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}"\n')
-        shim.chmod(0o755)
-    return shim
+    return _ScriptRunner(script)

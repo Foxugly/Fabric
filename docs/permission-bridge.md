@@ -93,3 +93,7 @@ attente (`fail_pending`).
 - Une seule question à la fois est affichée dans le terminal. Claude Code
   sérialise ses demandes d'autorisation, donc c'est suffisant en pratique.
 - `bypassPermissions` court-circuite entièrement le pont, par construction.
+- La politique locale de l'agent ([agent/README.md](../agent/README.md)) refuse
+  par défaut `bypassPermissions`, `acceptEdits`, `permission_prompt: false`, les
+  `allowed_tools` venus du serveur et tout `updated_input`. Chaque demande porte
+  un `fingerprint`, et la réponse doit viser le même `command_id`.

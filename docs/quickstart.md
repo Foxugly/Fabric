@@ -37,13 +37,13 @@ Identifiants par défaut :
 - username: `fabric-admin`
 - password: `fabric-password`
 
-`--staff` donne les droits d'administration. Un compte staff voit et pilote
-**tous** les agents de l'instance : ne l'accorder qu'à soi-même.
+`--staff` donne l'accès à l'admin Django local. Il ne donne aucun droit sur
+les agents des autres : chacun ne voit et ne pilote que les siens.
 
 ## 4. Créer un agent
 
 L'utilisateur doit exister avant : un agent appartient à quelqu'un, et un agent
-sans propriétaire n'est visible que du staff.
+sans propriétaire n'est visible de personne.
 
 ```bash
 .venv\Scripts\python manage.py create_dev_agent --name demo-agent --owner fabric-admin
@@ -71,7 +71,20 @@ curl http://127.0.0.1:8000/api/v1/auth/login/ ^
   -d "{\"username\":\"fabric-admin\",\"password\":\"fabric-password\"}"
 ```
 
-La réponse contient un token d'accès utilisateur.
+Le MFA TOTP est obligatoire : la réponse ne contient **pas** de jeton mais
+`{"mfa_setup_required": true, "mfa_token": "…"}` (premier login) ou
+`{"mfa_required": true, "mfa_token": "…"}`. Le plus simple est de se connecter
+une première fois depuis le frontend (étape 7), qui affiche le QR code à scanner
+puis les codes de secours. En ligne de commande, une fois enrôlé :
+
+```bash
+curl http://127.0.0.1:8000/api/v1/auth/mfa/verify/ ^
+  -H "Content-Type: application/json" ^
+  -d "{\"mfa_token\":\"<mfa_token>\",\"code\":\"<code TOTP>\"}"
+```
+
+Cette réponse contient `access` (JWT, 15 min) et `refresh` : sans `X-Auth-Mode: cookie`, le refresh reste dans le corps (usage script). Le SPA, lui, garde le refresh dans un cookie HttpOnly.
+Authentificateur perdu : `python manage.py reset_mfa fabric-admin`.
 
 ## 7. Lancer le frontend
 
@@ -87,7 +100,7 @@ L'interface est disponible sur `http://127.0.0.1:4200`.
 
 ```bash
 curl http://127.0.0.1:8000/api/v1/agents/ ^
-  -H "Authorization: Token <user_token>"
+  -H "Authorization: Bearer <access>"
 ```
 
 L'agent doit être `online`.
@@ -97,7 +110,7 @@ L'agent doit être `online`.
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/commands/ ^
   -H "Content-Type: application/json" ^
-  -H "Authorization: Token <user_token>" ^
+  -H "Authorization: Bearer <access>" ^
   -d "{\"agent_id\":\"<agent_id>\",\"provider\":\"echo\",\"action\":\"echo.message.send\",\"payload\":{\"text\":\"Bonjour Fabric\"}}"
 ```
 
@@ -107,7 +120,7 @@ La réponse retourne `command_id`.
 
 ```bash
 curl http://127.0.0.1:8000/api/v1/commands/<command_id>/ ^
-  -H "Authorization: Token <user_token>"
+  -H "Authorization: Bearer <access>"
 ```
 
 Le statut doit évoluer `pending -> dispatched -> running -> succeeded`, et les `events` doivent contenir les deltas de progression.
@@ -117,7 +130,7 @@ Le statut doit évoluer `pending -> dispatched -> running -> succeeded`, et les 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/commands/ ^
   -H "Content-Type: application/json" ^
-  -H "Authorization: Token <user_token>" ^
+  -H "Authorization: Bearer <access>" ^
   -d "{\"agent_id\":\"<agent_id>\",\"provider\":\"claude_code_local\",\"action\":\"claude_code_local.message.send\",\"timeout_seconds\":300,\"payload\":{\"text\":\"Reply with exactly: FABRIC_SMOKE_OK\",\"working_directory\":\"C:\\\\path\\\\to\\\\repo\",\"permission_mode\":\"plan\"}}"
 ```
 

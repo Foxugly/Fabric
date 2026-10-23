@@ -85,7 +85,8 @@ class ClaudeCodeMessageExecutor:
         installation = self._installation_probe.probe()
         if installation.executable_path is None:
             raise ClaudeCodeCliError(
-                "Claude Code CLI executable is not available on this machine"
+                installation.problem
+                or "Claude Code CLI executable is not available on this machine"
             )
         return ClaudeCodeCliRunner(installation.executable_path)
 

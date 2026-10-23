@@ -22,7 +22,36 @@
   "login": {
     "username": "Identifiant",
     "password": "Mot de passe",
-    "signIn": "Se connecter"
+    "signIn": "Se connecter",
+    "showPassword": "Afficher le mot de passe",
+    "hidePassword": "Masquer le mot de passe",
+    "mfa": {
+      "title": "Vérification en deux étapes",
+      "codeHint": "Saisissez le code à 6 chiffres de votre application d'authentification.",
+      "recoveryHint": "Saisissez un de vos codes de secours. Chaque code ne sert qu'une fois.",
+      "codePlaceholder": "123456",
+      "recoveryPlaceholder": "XXXXX-XXXXX",
+      "verify": "Vérifier",
+      "useRecoveryCode": "Utiliser un code de secours",
+      "useAuthenticator": "Utiliser l'application d'authentification",
+      "back": "Retour à la connexion",
+      "setupTitle": "Activer la vérification en deux étapes",
+      "setupHint": "La vérification en deux étapes est obligatoire. Scannez ce QR code avec une application d'authentification (Google Authenticator, Microsoft Authenticator, 1Password…), puis saisissez le code à 6 chiffres affiché.",
+      "qrAlt": "QR code à scanner avec votre application d'authentification",
+      "manualEntry": "Impossible de scanner ? Saisissez cette clé à la main :",
+      "loading": "Chargement…",
+      "activate": "Activer",
+      "codesTitle": "Conservez vos codes de secours",
+      "codesHint": "Si vous perdez votre téléphone, chacun de ces codes permet de se connecter une fois. Ils ne seront plus affichés : gardez-les en lieu sûr.",
+      "copy": "Copier les codes",
+      "copied": "Copiés",
+      "copyFailed": "Échec de la copie : notez les codes à la main.",
+      "saved": "Je les ai enregistrés",
+      "invalidCode": "Code invalide. Réessayez.",
+      "expired": "Connexion expirée. Saisissez à nouveau votre mot de passe.",
+      "throttled": "Trop de tentatives. Patientez une minute puis réessayez.",
+      "failed": "Échec de la vérification. Réessayez."
+    }
   },
   "notifications": {
     "title": "Notifications",

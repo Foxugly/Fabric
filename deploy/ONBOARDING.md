@@ -53,7 +53,18 @@ put FRONTEND_BASE_URL     https://fabric.foxugly.com
 put LOG_LEVEL             INFO
 put REDIS_URL             redis://127.0.0.1:6379/5
 put THROTTLE_LOGIN        10/hour
-put FABRIC_TOKEN_TTL_HOURS 168
+# Session web : access JWT court (mémoire du SPA) + refresh en cookie HttpOnly.
+# CORS_ALLOWED_ORIGINS ci-dessus est AUSSI la liste d'Origin acceptée par
+# refresh/logout en mode cookie : sans https://fabric.foxugly.com, plus de session.
+put JWT_ACCESS_MINUTES    15
+put JWT_REFRESH_DAYS      7
+# MFA TOTP (obligatoire) : throttles optionnels, 5/min par défaut.
+# put THROTTLE_MFA        5/min   # par IP, verify + setup/confirm
+# put THROTTLE_MFA_USER   5/min   # par compte
+# Clé de chiffrement des secrets TOTP : optionnelle. Absente, elle est dérivée
+# (HKDF) de SECRET_KEY. La changer (ou changer SECRET_KEY sans elle) rend les
+# secrets enrôlés illisibles -> reset_mfa pour chaque utilisateur.
+# put FABRIC_MFA_ENCRYPTION_KEY "$(openssl rand -base64 48)" SecureString
 
 # DB_* 6-var convention (§3.13)
 put DB_ENGINE postgresql
@@ -252,6 +263,8 @@ sudo chown root:root /usr/local/sbin/fabric-env-fetch.sh
 sudo chmod 0755 /usr/local/sbin/fabric-env-fetch.sh
 sudo git show origin/main:deploy/systemd/fabric-env-fetch.service | sudo tee /etc/systemd/system/fabric-env-fetch.service >/dev/null
 sudo git show origin/main:deploy/systemd/fabric-asgi.service | sudo tee /etc/systemd/system/fabric-asgi.service >/dev/null
+sudo git show origin/main:deploy/systemd/fabric-purge.service | sudo tee /etc/systemd/system/fabric-purge.service >/dev/null
+sudo git show origin/main:deploy/systemd/fabric-purge.timer | sudo tee /etc/systemd/system/fabric-purge.timer >/dev/null
 sudo git show origin/main:deploy/sudoers/fabric-deploy | sudo tee /etc/sudoers.d/fabric-deploy >/dev/null
 sudo chown root:root /etc/sudoers.d/fabric-deploy
 sudo chmod 0440 /etc/sudoers.d/fabric-deploy
@@ -261,6 +274,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now fabric-env-fetch
 sudo head -c 40 /run/fabric/.env   # doit montrer des variables, pas une erreur
 sudo systemctl enable fabric-asgi
+sudo systemctl enable --now fabric-purge.timer   # purge quotidienne (FABRIC_RETENTION_DAYS, défaut 30)
 ```
 
 ## 7. Sentry (§3.8)
@@ -314,8 +328,54 @@ troisième uniquement les grants `fabric-*`, la quatrième daphne.
 
 ## Ce qui reste après la mise en ligne
 
-1. Créer le premier utilisateur : `manage.py createsuperuser` sur la box, puis
-   `create_dev_agent --owner <lui>` pour l'agent du PC.
-2. Sur le PC Windows : `FABRIC_SERVER_WS_URL=wss://fabric.foxugly.com/ws/v1/agent/`
-   et faire tourner l'agent en service Windows plutôt que dans une fenêtre `cmd`.
+1. Créer l'opérateur comme **utilisateur normal** — ni superuser ni staff : un
+   compte staff n'a aucun pouvoir de plus sur les agents (chacun ne voit que les
+   siens) et l'admin Django n'est pas exposé (`/admin/` → 404 dans le vhost).
+   Le mot de passe est saisi au prompt, jamais en argument (historique shell).
+   Sur la box (`ssh -t`, utilisateur `django`, dans `backend/`, avec
+   l'environnement de `/run/fabric/.env` chargé comme dans `deploy/ssm-deploy.sh`) :
+
+   ```bash
+   .venv/bin/python manage.py shell -c "from django.contrib.auth import get_user_model as U; U().objects.create_user('<op>')"
+   .venv/bin/python manage.py changepassword <op>   # prompt, rien dans l'historique
+   ```
+
+   Ensuite `create_dev_agent --owner <op>` pour l'agent du PC. Changer le mot de passe révoque toutes les sessions
+   (refresh tokens blacklistés), quel que soit le chemin (API, `changepassword`).
+
+   **MFA TOTP obligatoire.** La première connexion web de `<op>` l'enrôle :
+   QR code à scanner avec une appli d'authentification, premier code, puis
+   10 codes de secours affichés **une seule fois** (à ranger dans le
+   gestionnaire de mots de passe). Les connexions suivantes demandent le code
+   à 6 chiffres (ou un code de secours). Le déploiement de la migration
+   `api_auth.0004` déconnecte toutes les sessions existantes.
+
+   **Verrouillé (téléphone perdu, plus de codes de secours)** — sur la box, même
+   environnement que ci-dessus :
+
+   ```bash
+   .venv/bin/python manage.py reset_mfa <op>   # efface le MFA + révoque les sessions
+   ```
+
+   La connexion suivante ré-enrôle un nouvel authentificateur.
+
+   **Admin Django** : fermé à Internet. L'administration passe par `manage.py`
+   en SSH. Pour un diagnostic ponctuel, un tunnel `ssh -L 8008:127.0.0.1:8008`
+   atteint daphne directement, mais `SECURE_SSL_REDIRECT` et `ALLOWED_HOSTS`
+   s'y appliquent : ce n'est pas un usage courant.
+2. Sur le PC Windows (détail : [agent/README.md](../agent/README.md)) :
+   - `FABRIC_SERVER_WS_URL=wss://fabric.foxugly.com/ws/v1/agent/` et
+     `FABRIC_AGENT_ID` en variables d'environnement **utilisateur** (`setx`).
+     `ws://` est refusé hors `localhost` avec `FABRIC_AGENT_ALLOW_INSECURE=1` ;
+   - le jeton dans `%APPDATA%\fabric-agent\agent-token`, lisible par
+     l'utilisateur seul : `.venv\Scripts\python -m fabric_agent.token_store`.
+     Il part dans l'en-tête `Authorization: Bearer`, plus dans l'URL ;
+   - la politique locale dans `%APPDATA%\fabric-agent\policy.toml`. Sans
+     fichier : PowerShell brut, `bypassPermissions`, `acceptEdits`,
+     `permission_prompt: false` et `network.recover` sont refusés, et chaque
+     outil de Claude demande une approbation. Le serveur ne peut pas relâcher
+     ces garde-fous ;
+   - lancer l'agent par une **tâche planifiée « à l'ouverture de session »** sous
+     le compte de l'utilisateur, pas en service Windows (un service tourne en
+     `LocalSystem` par défaut).
 3. Sentry frontend (§7 ci-dessus).

@@ -1,8 +1,8 @@
 # Fabric — root-side deploy, executed by AWS SSM (AWS-RunShellScript).
 #
 # ⚠️ Runs as ROOT under /bin/sh (dash) with a minimal env and no $HOME.
-# Hence `set -eu` (dash rejects `-o pipefail`), an explicit HOME, and
-# git safe.directory. See OPERATIONS.md §3.11 "git-blob-install gotchas".
+# Hence `set -eu` (dash rejects `-o pipefail`) and an explicit HOME.
+# See OPERATIONS.md §3.11 "git-blob-install gotchas".
 #
 # __SHA__ and __BUNDLE__ are substituted by the deploy workflow. Keep this file
 # POSIX sh and LF-only (.gitattributes enforces the latter).
@@ -23,32 +23,45 @@ BRANCH=main
 BUNDLE=__BUNDLE__
 SPA_DIR="$APP_DIR/frontend/dist/fabric-frontend/browser"
 VHOST=/etc/nginx/sites-available/fabric.foxugly.com
+SHA=__SHA__
+# Root's OWN bare mirror (root:root 700): every root-installed blob is read
+# here, fetched from GitHub at the exact deployed SHA — never from the
+# django-owned checkout, whose .git (refs, config, hooks) django could rewrite
+# to make root install or run attacker content (§3.10).
+MIRROR=/var/lib/fleet-deploy/Fabric.git
 
 echo "== deploying __SHA__ =="
 
-git config --global --get-all safe.directory 2>/dev/null | grep -qx "$APP_DIR" \
-  || git config --global --add safe.directory "$APP_DIR"
+# Root no longer runs git inside the django-owned repo: drop its old trust.
+git config --global --fixed-value --unset-all safe.directory "$APP_DIR" || true
+
+echo "== fetch root mirror =="
+install -d -m 700 -o root -g root /var/lib/fleet-deploy
+[ -d "$MIRROR" ] || git init --quiet --bare "$MIRROR"
+git --git-dir="$MIRROR" fetch --quiet --depth=1 https://github.com/Foxugly/Fabric.git "$SHA"
+git --git-dir="$MIRROR" cat-file -e "$SHA^{commit}"
 
 echo "== sync code =="
 cd "$APP_DIR"
 sudo -u django git fetch --prune origin "$BRANCH"
 sudo -u django git reset --hard "origin/$BRANCH"
 
-# Root-loaded artifacts come from the committed git blob, never from the
-# django-writable working tree (§3.10).
+# Root-loaded artifacts come from the committed git blob in root's mirror,
+# never from the django-writable working tree or its .git (§3.10).
 echo "== install env-fetch script =="
-git show "origin/$BRANCH:deploy/fetch-env-from-ssm.sh" > /usr/local/sbin/fabric-env-fetch.sh
+git --git-dir="$MIRROR" show "$SHA:deploy/fetch-env-from-ssm.sh" > /usr/local/sbin/fabric-env-fetch.sh
 chown root:root /usr/local/sbin/fabric-env-fetch.sh
 chmod 0755 /usr/local/sbin/fabric-env-fetch.sh
 
 echo "== install systemd units =="
-git show "origin/$BRANCH:deploy/systemd/fabric-env-fetch.service" > /etc/systemd/system/fabric-env-fetch.service
-git show "origin/$BRANCH:deploy/systemd/fabric-asgi.service" > /etc/systemd/system/fabric-asgi.service
+for u in fabric-env-fetch.service fabric-asgi.service fabric-purge.service fabric-purge.timer; do
+    git --git-dir="$MIRROR" show "$SHA:deploy/systemd/$u" > "/etc/systemd/system/$u"
+done
 systemctl daemon-reload
 
 echo "== install nginx vhost =="
 if [ -f "$VHOST" ]; then cp -a "$VHOST" "$VHOST.deploybak"; fi
-git show "origin/$BRANCH:deploy/nginx/fabric.foxugly.com.conf" > "$VHOST"
+git --git-dir="$MIRROR" show "$SHA:deploy/nginx/fabric.foxugly.com.conf" > "$VHOST"
 ln -sfn "$VHOST" /etc/nginx/sites-enabled/fabric.foxugly.com
 if nginx -t; then
     systemctl reload nginx
@@ -64,10 +77,14 @@ else
 fi
 
 echo "== unpack the SPA =="
+# Root only downloads (instance role) into its private mktemp -d (700); DJANGO
+# extracts, reading the bundle on stdin (redirection opened by root). Root never
+# writes into the django-owned tree, where django could plant a symlink to
+# redirect a root write to /etc (§3.10).
 TMP=$(mktemp -d)
 aws s3 cp "$BUNDLE" "$TMP/spa.tar.gz"
 sudo -u django mkdir -p "$SPA_DIR"
-tar -xzf "$TMP/spa.tar.gz" -C "$SPA_DIR" --no-same-owner
+sudo -u django tar -xzf - -C "$SPA_DIR" --no-same-owner --no-overwrite-dir < "$TMP/spa.tar.gz"
 rm -rf "$TMP"
 
 # Frontend Sentry config, substituted into index.html from the SSM-fetched env.
@@ -80,8 +97,9 @@ if [ -r /run/fabric/.env ]; then
     ENVN=$(sed -n 's/^SENTRY_FRONTEND_ENV=//p' /run/fabric/.env | head -1)
     if [ -n "$DSN" ]; then
         echo "== inject frontend Sentry config =="
-        # `|` as the sed delimiter: a DSN is full of slashes.
-        sed -i \
+        # `|` as the sed delimiter: a DSN is full of slashes. Run AS DJANGO: the
+        # file sits in django's tree (sed -i as root could follow a planted link).
+        sudo -u django sed -i \
             -e "s|__FABRIC_SENTRY_FRONTEND_DSN__|${DSN}|g" \
             -e "s|__FABRIC_SENTRY_FRONTEND_ENV__|${ENVN:-PROD}|g" \
             -e "s|__FABRIC_SENTRY_FRONTEND_RELEASE__|__SHA__|g" \
@@ -95,13 +113,19 @@ echo "== backend deploy (as django) =="
 sudo -u django bash "$APP_DIR/deploy/ssm-deploy.sh"
 
 echo "== restart =="
+# enable: the unit was disabled while Fabric was stopped (2026-10-09 → 2026-10-20);
+# idempotent, and keeps it up after a reboot.
+systemctl enable --quiet fabric-asgi
 systemctl restart fabric-asgi
+# Daily retention purge (I4): idempotent, and keeps it scheduled after a reboot.
+systemctl enable --now fabric-purge.timer
 
 # chown BEFORE chmod: stripping o-rwx first would lock django out of files it
 # does not yet own (§3.1).
 echo "== normalize perms =="
-chown -R django:www-data "$APP_DIR"
-chmod -R g-w,o-rwx "$APP_DIR"
+# -h: never follow a symlink django may have planted; chmod runs AS DJANGO.
+chown -R -h django:www-data "$APP_DIR"
+sudo -u django chmod -R g-w,o-rwx "$APP_DIR"
 
 echo "== health =="
 sleep 5

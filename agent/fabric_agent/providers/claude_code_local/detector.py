@@ -11,12 +11,15 @@ from fabric_agent.providers.claude_code_local.models import (
     ActionRequired,
     SessionStatus,
 )
+from fabric_agent.providers.claude_code_local.runner import is_batch_launcher
 
 
 @dataclass(slots=True, frozen=True)
 class ClaudeCodeInstallation:
     executable_path: Path | None
     version: str | None
+    #: Why a `claude` found on PATH cannot be used, e.g. a `.cmd` launcher.
+    problem: str | None = None
 
     @property
     def available(self) -> bool:
@@ -43,6 +46,22 @@ class ClaudeCodeInstallationProbe:
         if executable_path is None:
             return ClaudeCodeInstallation(executable_path=None, version=None)
         resolved_path = Path(executable_path)
+        if is_batch_launcher(resolved_path):
+            # npm installs `claude.cmd`, which runs through cmd.exe and would
+            # re-parse the prompt. Prefer a real executable when there is one.
+            native = shutil.which(f"{resolved_path.stem}.exe")
+            if native is None:
+                return ClaudeCodeInstallation(
+                    executable_path=None,
+                    version=None,
+                    problem=(
+                        f"{resolved_path} is a .cmd/.bat launcher, which Fabric "
+                        "refuses to run (cmd.exe would interpret the prompt). "
+                        "Install the native claude.exe or point "
+                        "FABRIC_CLAUDE_CODE_EXECUTABLE at it."
+                    ),
+                )
+            resolved_path = Path(native)
         return ClaudeCodeInstallation(
             executable_path=resolved_path,
             version=_read_claude_version(resolved_path),
@@ -95,7 +114,8 @@ class ClaudeCodeSessionStatusDetector:
                 action_required=ActionRequired(
                     type="local_session_setup",
                     provider="claude_code_local",
-                    message=(
+                    message=installation.problem
+                    or (
                         "Claude Code CLI was not found on the Windows PC. Install or "
                         "expose the `claude` executable before Fabric can attach."
                     ),

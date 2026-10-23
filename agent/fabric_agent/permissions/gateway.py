@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import secrets
@@ -38,6 +39,22 @@ class PermissionRequest:
     tool_input: dict[str, Any] = field(default_factory=dict)
     tool_use_id: str | None = None
 
+    @property
+    def fingerprint(self) -> str:
+        """Binds an approval to the exact command and tool input it was asked for."""
+        canonical = json.dumps(
+            {
+                "request_id": self.request_id,
+                "command_id": self.command_id,
+                "tool_name": self.tool_name,
+                "input": self.tool_input,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
     def to_payload(self) -> dict[str, Any]:
         return {
             "request_id": self.request_id,
@@ -45,6 +62,7 @@ class PermissionRequest:
             "tool_name": self.tool_name,
             "input": self.tool_input,
             "tool_use_id": self.tool_use_id,
+            "fingerprint": self.fingerprint,
         }
 
 
@@ -81,7 +99,9 @@ class PermissionGateway:
         self._token = secrets.token_urlsafe(32)
         self._server: asyncio.Server | None = None
         self._port: int | None = None
-        self._pending: dict[str, asyncio.Future[PermissionDecision]] = {}
+        self._pending: dict[
+            str, tuple[PermissionRequest, asyncio.Future[PermissionDecision]]
+        ] = {}
 
     @property
     def token(self) -> str:
@@ -122,16 +142,56 @@ class PermissionGateway:
         self._server = None
         self._port = None
 
-    def resolve(self, request_id: str, decision: PermissionDecision) -> bool:
-        future = self._pending.pop(request_id, None)
-        if future is None or future.done():
+    def resolve(
+        self,
+        request_id: str,
+        decision: PermissionDecision,
+        *,
+        command_id: str,
+        fingerprint: str | None = None,
+        require_fingerprint: bool = False,
+    ) -> bool:
+        """Apply a decision only to the request it was issued for.
+
+        The answer must name the same command as the request, and, when it
+        carries a fingerprint (mandatory with `require_fingerprint`), that
+        fingerprint must match the exact tool input that was shown. A mismatch
+        leaves the request pending: the genuine answer can still arrive.
+        """
+        entry = self._pending.get(request_id)
+        if entry is None:
             return False
+        request, future = entry
+        if future.done():
+            self._pending.pop(request_id, None)
+            return False
+        if not secrets.compare_digest(command_id, request.command_id):
+            LOGGER.warning(
+                "Approval %s names command %r, expected %r: ignored",
+                request_id,
+                command_id,
+                request.command_id,
+            )
+            return False
+        if fingerprint is None:
+            if require_fingerprint:
+                LOGGER.warning(
+                    "Approval %s carries no fingerprint: ignored", request_id
+                )
+                return False
+        elif not secrets.compare_digest(fingerprint, request.fingerprint):
+            LOGGER.warning(
+                "Approval %s does not match the requested input: ignored",
+                request_id,
+            )
+            return False
+        self._pending.pop(request_id, None)
         future.set_result(decision)
         return True
 
     def fail_pending(self, reason: str) -> None:
         """Deny everything still waiting, e.g. when the socket to Fabric drops."""
-        for request_id, future in list(self._pending.items()):
+        for request_id, (_, future) in list(self._pending.items()):
             self._pending.pop(request_id, None)
             if not future.done():
                 future.set_result(PermissionDecision(allowed=False, message=reason))
@@ -187,7 +247,7 @@ class PermissionGateway:
 
         loop = asyncio.get_running_loop()
         future: asyncio.Future[PermissionDecision] = loop.create_future()
-        self._pending[request.request_id] = future
+        self._pending[request.request_id] = (request, future)
         try:
             await self._handler(request)
         except Exception as exc:

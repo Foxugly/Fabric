@@ -127,15 +127,46 @@ def test_created_agents_belong_to_their_creator(owner: Any) -> None:
 
 
 @pytest.mark.django_db
-def test_ownerless_agents_stay_staff_only(intruder: Any) -> None:
-    legacy = Agent.objects.create(name="legacy-agent")
-    staff = get_user_model().objects.create_user(
-        username="staff",
-        password="staff-password",
-        is_staff=True,
+def test_ownerless_agents_are_visible_to_nobody(intruder: Any) -> None:
+    Agent.objects.create(name="legacy-agent")
+    superuser = get_user_model().objects.create_superuser(
+        username="root", password="root-password"
     )
 
     assert _client(intruder).get("/api/v1/agents/").json() == []
-    assert [entry["id"] for entry in _client(staff).get("/api/v1/agents/").json()] == [
-        str(legacy.id)
-    ]
+    assert _client(superuser).get("/api/v1/agents/").json() == []
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("flags", [{"is_staff": True}, {"is_superuser": True}])
+def test_staff_and_superusers_cannot_see_or_drive_other_users_agents(
+    owned_agent: Agent, flags: dict[str, bool]
+) -> None:
+    """M6: an admin flag must not double as root on every registered PC."""
+    admin = get_user_model().objects.create_user(
+        username="admin", password="admin-password"
+    )
+    for name, value in flags.items():
+        setattr(admin, name, value)
+    admin.save()
+    client = _client(admin)
+
+    assert client.get("/api/v1/agents/").json() == []
+    assert client.get(f"/api/v1/agents/{owned_agent.id}/").status_code == 404
+    assert (
+        client.post(f"/api/v1/agents/{owned_agent.id}/development-token/").status_code
+        == 404
+    )
+    assert client.post(f"/api/v1/agents/{owned_agent.id}/revoke/").status_code == 404
+    response = client.post(
+        "/api/v1/commands/",
+        {
+            "agent_id": str(owned_agent.id),
+            "provider": "windows_powershell",
+            "action": "windows_powershell.command.run",
+            "payload": {"session_id": "s", "command": "whoami"},
+        },
+        format="json",
+    )
+    assert response.status_code == 400
+    assert "agent_id" in response.json()

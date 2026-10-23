@@ -72,7 +72,7 @@ echo [6/7] Starting frontend...
 start "Fabric Frontend" cmd /k "cd /d ""%FRONTEND_DIR%"" && npm.cmd start -- --host 127.0.0.1 --port 4200"
 
 echo [7/7] Starting agent...
-start "Fabric Agent" cmd /k "cd /d ""%AGENT_DIR%"" && set FABRIC_SERVER_WS_URL=%BACKEND_WS_URL% && set FABRIC_AGENT_ID=%FABRIC_AGENT_ID% && set FABRIC_AGENT_TOKEN=%FABRIC_AGENT_TOKEN% && ""%AGENT_PY%"" -m fabric_agent"
+start "Fabric Agent" cmd /k "cd /d ""%AGENT_DIR%"" && set FABRIC_SERVER_WS_URL=%BACKEND_WS_URL% && set FABRIC_AGENT_ALLOW_INSECURE=1 && set FABRIC_AGENT_ID=%FABRIC_AGENT_ID% && set FABRIC_AGENT_TOKEN=%FABRIC_AGENT_TOKEN% && ""%AGENT_PY%"" -m fabric_agent"
 
 echo.
 echo Fabric started.

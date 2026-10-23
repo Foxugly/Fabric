@@ -22,7 +22,36 @@
   "login": {
     "username": "Usuario",
     "password": "Contraseña",
-    "signIn": "Iniciar sesión"
+    "signIn": "Iniciar sesión",
+    "showPassword": "Mostrar contraseña",
+    "hidePassword": "Ocultar contraseña",
+    "mfa": {
+      "title": "Verificación en dos pasos",
+      "codeHint": "Introduce el código de 6 dígitos de tu aplicación de autenticación.",
+      "recoveryHint": "Introduce uno de tus códigos de recuperación. Cada código solo sirve una vez.",
+      "codePlaceholder": "123456",
+      "recoveryPlaceholder": "XXXXX-XXXXX",
+      "verify": "Verificar",
+      "useRecoveryCode": "Usar un código de recuperación",
+      "useAuthenticator": "Usar la aplicación de autenticación",
+      "back": "Volver al inicio de sesión",
+      "setupTitle": "Configurar la verificación en dos pasos",
+      "setupHint": "La verificación en dos pasos es obligatoria. Escanea este código QR con una aplicación de autenticación (Google Authenticator, Microsoft Authenticator, 1Password…) y luego introduce el código de 6 dígitos que muestra.",
+      "qrAlt": "Código QR para escanear con tu aplicación de autenticación",
+      "manualEntry": "¿No puedes escanear? Introduce esta clave a mano:",
+      "loading": "Cargando…",
+      "activate": "Activar",
+      "codesTitle": "Guarda tus códigos de recuperación",
+      "codesHint": "Si pierdes el teléfono, cada uno de estos códigos te permite iniciar sesión una vez. No se volverán a mostrar: guárdalos en un lugar seguro.",
+      "copy": "Copiar los códigos",
+      "copied": "Copiados",
+      "copyFailed": "Error al copiar: anota los códigos a mano.",
+      "saved": "Los he guardado",
+      "invalidCode": "Código no válido. Inténtalo de nuevo.",
+      "expired": "Inicio de sesión caducado. Introduce de nuevo tu contraseña.",
+      "throttled": "Demasiados intentos. Espera un minuto e inténtalo de nuevo.",
+      "failed": "Error de verificación. Inténtalo de nuevo."
+    }
   },
   "notifications": {
     "title": "Notificaciones",

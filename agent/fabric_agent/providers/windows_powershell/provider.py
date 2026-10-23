@@ -21,7 +21,13 @@ SAFE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.*\-]{1,64}$")
 
 
 class WindowsPowerShellProvider(Provider):
-    """Safe Windows PowerShell adapter with explicit whitelisted actions only."""
+    """Windows PowerShell adapter.
+
+    `command.run` with a free `command` is a full remote shell and
+    `network.recover` can cut the PC off the network: both are refused by the
+    agent's local policy (`fabric_agent.application.policy`) unless the owner of
+    the PC enables them there.
+    """
 
     name = "windows_powershell"
     actions = (
