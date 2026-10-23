@@ -20,7 +20,12 @@ PROVIDER_ACTIONS: dict[str, str] = {
     "echo": "echo.message.send",
     "claude_code_local": "claude_code_local.message.send",
 }
-CONVERSATION_TIMEOUT_SECONDS = 600
+#: Bounds a whole turn on the PC (Claude's work and any approval wait). It is
+#: sent with the command, so it applies without updating the agent.
+CONVERSATION_TIMEOUT_SECONDS = 1200
+#: Same default as the terminal. The PC's `policy.toml` has the last word: a
+#: mode it does not list makes the turn fail with `policy_refused`.
+CLAUDE_DEFAULT_PERMISSION_MODE = "bypassPermissions"
 
 
 def _build_payload(conversation: Conversation, content: str) -> dict[str, Any]:
@@ -31,6 +36,8 @@ def _build_payload(conversation: Conversation, content: str) -> dict[str, Any]:
     the conversation would only look continuous in Fabric's own database.
     """
     payload: dict[str, Any] = {"text": content}
+    if conversation.provider == "claude_code_local":
+        payload["permission_mode"] = CLAUDE_DEFAULT_PERMISSION_MODE
     if conversation.external_id:
         payload["session_id"] = conversation.external_id
     return payload

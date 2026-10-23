@@ -12,7 +12,7 @@ from shared.protocol import build_message
 from ws_helpers import agent_headers, events_path
 
 from apps.agents.models import Agent
-from apps.commands.models import CommandStatus
+from apps.commands.models import Command, CommandStatus
 from apps.conversations.models import MessageRole, MessageStatus
 from config.asgi import application
 
@@ -180,3 +180,44 @@ async def test_message_create_dispatches_command_and_updates_assistant_message(
 
     await agent_communicator.disconnect()
     await event_communicator.disconnect()
+
+
+def _send_message(client: APIClient, agent: Agent, provider: str) -> Command:
+    conversation = client.post(
+        "/api/v1/conversations/",
+        {"agent_id": str(agent.id), "provider": provider, "title": provider},
+        format="json",
+    )
+    assert conversation.status_code == 201
+    response = client.post(
+        f"/api/v1/conversations/{conversation.json()['id']}/messages/",
+        {"content": "Bonjour"},
+        format="json",
+    )
+    assert response.status_code == 201
+    return Command.objects.get(id=response.json()["command_id"])
+
+
+@pytest.mark.django_db
+def test_claude_turn_bypasses_permissions_with_a_20_minute_timeout(
+    authenticated_api_client: APIClient, api_user: Any
+) -> None:
+    agent = Agent.objects.create(name="agent", owner=api_user)
+
+    command = _send_message(authenticated_api_client, agent, "claude_code_local")
+
+    assert command.timeout_seconds == 1200
+    assert command.payload["permission_mode"] == "bypassPermissions"
+    assert command.payload["text"] == "Bonjour"
+
+
+@pytest.mark.django_db
+def test_echo_turn_carries_no_permission_mode(
+    authenticated_api_client: APIClient, api_user: Any
+) -> None:
+    agent = Agent.objects.create(name="agent", owner=api_user)
+
+    command = _send_message(authenticated_api_client, agent, "echo")
+
+    assert "permission_mode" not in command.payload
+    assert command.timeout_seconds == 1200
