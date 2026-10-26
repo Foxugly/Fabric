@@ -20,7 +20,7 @@ dev = [
   "pytest==9.1.1",
   "pytest-asyncio>=1.4.0,<2",
   "pytest-timeout>=2.3",
-  "ruff==0.16.5",
+  "ruff==0.17.2",
 ]
 
 [tool.setuptools]
