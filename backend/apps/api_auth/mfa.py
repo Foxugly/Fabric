@@ -15,6 +15,11 @@ second factor.
 * `mfa_token` = `django.core.signing` (salted, timestamped, 5 min) over the
   user id and the device nonce. The nonce rotates whenever a login completes
   (and at every password step), so a token completes at most one login.
+* Wrong codes are counted on `MfaDevice` (FABRIC-3), reset by a success:
+  every `FABRIC_MFA_MAX_FAILURES_PER_TOKEN`-th spends the token (back to the
+  password), `FABRIC_MFA_LOCKOUT_THRESHOLD` lock the factor for
+  `FABRIC_MFA_LOCKOUT_SECONDS` (`reset_mfa` lifts it). Both alert the
+  operator (PushIT event `mfa_failures`, log, Sentry on the lock).
 * Recovery codes: 10 per user, shown once, stored as salted SHA-256 (they are
   random, 50 bits each: a slow hash would only slow the login down).
 """
@@ -24,10 +29,12 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import logging
 import secrets
 import struct
 import time
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -51,6 +58,8 @@ _RECOVERY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I
 _RECOVERY_CODE_LENGTH = 10
 _TOKEN_SALT = "fabric.api_auth.mfa_token"
 
+LOGGER = logging.getLogger(__name__)
+
 
 class MfaError(Exception):
     """A refused MFA step. `code` is the generic, client-facing error code."""
@@ -67,6 +76,21 @@ def token_invalid() -> MfaError:
 
 def code_invalid() -> MfaError:
     return MfaError("mfa_invalid_code", "Invalid code.")
+
+
+def token_spent() -> MfaError:
+    # Same code as an expired token: the SPA goes back to the password step.
+    return MfaError(
+        "mfa_token_invalid", "Too many invalid codes: enter your password again."
+    )
+
+
+def factor_locked() -> MfaError:
+    return MfaError(
+        "mfa_locked",
+        "Too many invalid codes: the second factor is locked. "
+        "Try again later or ask the administrator to reset it.",
+    )
 
 
 # --- Encryption at rest ------------------------------------------------------
@@ -265,22 +289,83 @@ def confirm_setup(token: str, code: str) -> tuple[Any, bool, list[str]]:
 
 
 def verify(token: str, code: str) -> tuple[Any, bool]:
-    """`mfa/verify/`: a TOTP code or a recovery code. Returns (user, remember_me)."""
+    """`mfa/verify/`: a TOTP code or a recovery code. Returns (user, remember_me).
+
+    A refusal is committed before it is raised (the counter must survive the
+    error), and alerts are sent once the transaction is over.
+    """
     with transaction.atomic():
         pending = _locked_pending_login(token)
         device = pending.device
         if not device.enabled or not device.secret:
             raise code_invalid()
+        if device.locked_until is not None:
+            if device.locked_until > timezone.now():
+                raise factor_locked()
+            # The lock expired: a new count starts.
+            device.locked_until = None
+            device.failed_attempts = 0
         step = match_totp_step(
             decrypt_secret(device.secret), code, device.last_used_step
         )
-        if step is not None:
-            device.last_used_step = step
-        elif not _consume_recovery_code(pending.user, code):
-            raise code_invalid()
-        device.nonce = _new_nonce()  # the token is spent
-        device.save(update_fields=["last_used_step", "nonce", "updated_at"])
-        return pending.user, pending.remember_me
+        if step is not None or _consume_recovery_code(pending.user, code):
+            if step is not None:
+                device.last_used_step = step
+            device.failed_attempts = 0
+            device.nonce = _new_nonce()  # the token is spent
+            device.save(
+                update_fields=[
+                    "last_used_step",
+                    "failed_attempts",
+                    "locked_until",
+                    "nonce",
+                    "updated_at",
+                ]
+            )
+            return pending.user, pending.remember_me
+        refusal, alert = _record_failure(device)
+    if alert:
+        locked = refusal.code == "mfa_locked"
+        _alert_operator(pending.user, device.failed_attempts, locked=locked)
+    raise refusal
+
+
+def _record_failure(device: MfaDevice) -> tuple[MfaError, bool]:
+    """Count a wrong code on the (locked) row: (the refusal, alert the operator?)."""
+    device.failed_attempts += 1
+    failures = device.failed_attempts
+    refusal, alert = code_invalid(), False
+    if failures >= settings.FABRIC_MFA_LOCKOUT_THRESHOLD:
+        device.locked_until = timezone.now() + timedelta(
+            seconds=settings.FABRIC_MFA_LOCKOUT_SECONDS
+        )
+        device.nonce = _new_nonce()
+        refusal, alert = factor_locked(), True
+        LOGGER.error(
+            "MFA locked for user %s after %s invalid codes", device.user_id, failures
+        )
+    elif failures % settings.FABRIC_MFA_MAX_FAILURES_PER_TOKEN == 0:
+        device.nonce = _new_nonce()
+        refusal, alert = token_spent(), True
+        LOGGER.warning(
+            "MFA token of user %s spent after %s invalid codes",
+            device.user_id,
+            failures,
+        )
+    else:
+        LOGGER.warning(
+            "MFA code refused for user %s (%s in a row)", device.user_id, failures
+        )
+    device.save(
+        update_fields=["failed_attempts", "locked_until", "nonce", "updated_at"]
+    )
+    return refusal, alert
+
+
+def _alert_operator(user: Any, failures: int, *, locked: bool) -> None:
+    from apps.commands.notifications import notify_mfa_failures
+
+    notify_mfa_failures(user, failures=failures, locked=locked)
 
 
 # --- Recovery codes ----------------------------------------------------------

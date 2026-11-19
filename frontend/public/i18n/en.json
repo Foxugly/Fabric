@@ -50,7 +50,8 @@
       "invalidCode": "Invalid code. Try again.",
       "expired": "Sign-in expired. Enter your password again.",
       "throttled": "Too many attempts. Wait a minute and try again.",
-      "failed": "Verification failed. Try again."
+      "failed": "Verification failed. Try again.",
+      "locked": "Too many invalid codes: sign-in is locked for 24 hours (or until the administrator resets it)."
     }
   },
   "notifications": {

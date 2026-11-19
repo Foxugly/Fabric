@@ -50,7 +50,8 @@
       "invalidCode": "Ongeldige code. Probeer het opnieuw.",
       "expired": "Aanmelding verlopen. Voer je wachtwoord opnieuw in.",
       "throttled": "Te veel pogingen. Wacht een minuut en probeer het opnieuw.",
-      "failed": "Verificatie mislukt. Probeer het opnieuw."
+      "failed": "Verificatie mislukt. Probeer het opnieuw.",
+      "locked": "Te veel ongeldige codes: aanmelden is 24 uur geblokkeerd (of tot de beheerder het herstelt)."
     }
   },
   "notifications": {

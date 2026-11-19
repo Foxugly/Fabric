@@ -1021,6 +1021,10 @@ export class AppComponent implements OnDestroy {
       this.loginErrorKey.set('login.mfa.throttled');
       return;
     }
+    if (code === 'mfa_locked') {
+      this.loginErrorKey.set('login.mfa.locked');
+      return;
+    }
     this.loginErrorKey.set(code === 'mfa_invalid_code' ? 'login.mfa.invalidCode' : 'login.mfa.failed');
   }
 

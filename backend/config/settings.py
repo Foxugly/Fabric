@@ -167,6 +167,23 @@ elif not DEBUG:
 else:
     CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
 
+# Cache = DRF throttle counters. LocMem was per process and emptied by every
+# restart (FABRIC-3), so a deploy reset the login/MFA limits: with Redis they
+# are shared and survive restarts. Same database as the channel layer (5);
+# the prefix keeps the keys apart from channels_redis' own ("asgi:*").
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+            "KEY_PREFIX": "fabric-cache",
+        }
+    }
+else:
+    CACHES = {
+        "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}
+    }
+
 REST_FRAMEWORK = {
     # SimpleJWT only (OPERATIONS.md §3.25): a short-lived access token kept in
     # the SPA's memory, the refresh token in an HttpOnly cookie
@@ -193,6 +210,8 @@ REST_FRAMEWORK = {
         # Login is the only barrier between the Internet and remote code
         # execution on the operator's PC: rate limited per IP AND per username.
         "login": _env("THROTTLE_LOGIN", "10/hour"),
+        # Per username, only FAILED password steps count (FABRIC-7): otherwise
+        # anyone could lock the operator out with 20 requests of any kind.
         "login_username": _env("THROTTLE_LOGIN_USERNAME", "20/hour"),
         "password_change": _env("THROTTLE_PASSWORD_CHANGE", "5/min"),
         "account_delete": _env("THROTTLE_ACCOUNT_DELETE", "5/min"),
@@ -257,6 +276,13 @@ FABRIC_WS_TICKET_TTL_SECONDS = min(int(_env("FABRIC_WS_TICKET_TTL_SECONDS", "30"
 FABRIC_MFA_ENCRYPTION_KEY = _env("FABRIC_MFA_ENCRYPTION_KEY")
 #: Lifetime of the `mfa_token` handed out by the password step.
 FABRIC_MFA_TOKEN_TTL_SECONDS = 300
+#: FABRIC-3. Wrong codes counted on `MfaDevice` (reset by a success): every
+#: N-th one spends the `mfa_token` (the password must be entered again), and
+#: the threshold locks the second factor for `FABRIC_MFA_LOCKOUT_SECONDS` —
+#: `manage.py reset_mfa <user>` lifts it at once. Both alert the operator.
+FABRIC_MFA_MAX_FAILURES_PER_TOKEN = 3
+FABRIC_MFA_LOCKOUT_THRESHOLD = 10
+FABRIC_MFA_LOCKOUT_SECONDS = int(_env("FABRIC_MFA_LOCKOUT_SECONDS", str(24 * 3600)))
 FABRIC_MFA_ISSUER = "Fabric"
 
 #: An agent grants remote code execution on the machine it runs on. Outside debug
@@ -343,6 +369,9 @@ PUSHIT_DEFAULT_EVENTS = {
     "claude_turn_completed": True,
     "claude_turn_failed": True,
     "agent_offline": False,
+    # FABRIC-3: wrong second-factor codes (a token spent, then the lock). The
+    # password was right, so it may be compromised.
+    "mfa_failures": True,
 }
 
 

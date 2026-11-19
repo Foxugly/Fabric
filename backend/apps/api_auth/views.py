@@ -6,6 +6,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import permissions, response, status, viewsets
+from rest_framework.exceptions import ValidationError
 from rest_framework.request import Request
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
@@ -108,7 +109,10 @@ class LoginView(APIView):
         if (rejected := refresh_cookie.cookie_origin_guard(request)) is not None:
             return rejected
         serializer = LoginSerializer(data=request.data, context={"request": request})
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            # Only failures count against the username (FABRIC-7).
+            LoginUsernameRateThrottle().record_failure(request, self)
+            raise ValidationError(serializer.errors)
         user = serializer.validated_data["user"]
         token, enrolled = mfa.issue_mfa_token(
             user, remember_me=bool(serializer.validated_data.get("remember_me"))

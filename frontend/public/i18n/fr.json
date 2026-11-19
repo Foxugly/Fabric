@@ -50,7 +50,8 @@
       "invalidCode": "Code invalide. Réessayez.",
       "expired": "Connexion expirée. Saisissez à nouveau votre mot de passe.",
       "throttled": "Trop de tentatives. Patientez une minute puis réessayez.",
-      "failed": "Échec de la vérification. Réessayez."
+      "failed": "Échec de la vérification. Réessayez.",
+      "locked": "Trop de codes invalides : la connexion est verrouillée pendant 24 heures (ou jusqu'à sa réinitialisation par l'administrateur)."
     }
   },
   "notifications": {
