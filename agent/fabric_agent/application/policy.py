@@ -46,6 +46,8 @@ from typing import Any
 
 from shared.protocol import all_qualified_actions, local_action, qualify
 
+from fabric_agent.providers.claude_code_local import cli_arguments
+
 LOGGER = logging.getLogger(__name__)
 
 POLICY_FILE_ENV = "FABRIC_AGENT_POLICY_FILE"
@@ -213,6 +215,22 @@ class LocalPolicy:
             self._check_powershell(local, parameters)
 
     def _check_claude_message(self, parameters: dict[str, Any]) -> None:
+        unknown = cli_arguments.unknown_message_keys(parameters)
+        if unknown:
+            raise PolicyViolation(
+                f"unsupported claude_code_local parameters: {', '.join(unknown)}"
+            )
+        # Values that reach the `claude` command line: one starting with `-`
+        # would be parsed as an option (--dangerously-skip-permissions).
+        try:
+            cli_arguments.session_id(parameters.get("session_id"))
+            cli_arguments.model(parameters.get("model"))
+            cli_arguments.tool_list(parameters.get("allowed_tools"), "allowed_tools")
+            cli_arguments.tool_list(
+                parameters.get("disallowed_tools"), "disallowed_tools"
+            )
+        except ValueError as exc:
+            raise PolicyViolation(str(exc)) from exc
         mode = parameters.get("permission_mode")
         if mode is not None and (
             not isinstance(mode, str) or mode not in self.allowed_permission_modes

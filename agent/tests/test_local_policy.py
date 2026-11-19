@@ -28,6 +28,13 @@ def _claude(**parameters: Any) -> tuple[str, str, dict[str, Any]]:
         _claude(permission_prompt=False),
         _claude(allowed_tools=["Bash(*)"]),
         _claude(permission_mode=["bypassPermissions"]),
+        _claude(disallowed_tools=["--dangerously-skip-permissions"]),
+        _claude(disallowed_tools=["Bash", "-p"]),
+        _claude(session_id="--dangerously-skip-permissions"),
+        _claude(session_id="not-a-uuid"),
+        _claude(model="--dangerously-skip-permissions"),
+        _claude(dangerously_skip_permissions=True),
+        _claude(_fabric_command_id="forged"),
         (POWERSHELL, f"{POWERSHELL}.command.run", {"command": "whoami"}),
         (POWERSHELL, f"{POWERSHELL}.network.recover", {}),
         ("ghost", "ghost.anything", {}),
@@ -46,6 +53,13 @@ def test_defaults_refuse_server_side_relaxations(
         _claude(),
         _claude(permission_mode="default", disallowed_tools=["Bash"]),
         _claude(permission_mode="plan"),
+        _claude(
+            session_id="0f8e2a3c-5b1d-4c6e-9a7f-1234567890ab",
+            model="claude-opus-4-1",
+            working_directory=None,
+            timeout_seconds=1200,
+            disallowed_tools=["Bash(rm:*)", "mcp__github__create_issue"],
+        ),
         (POWERSHELL, f"{POWERSHELL}.command.run", {"operation": "get_location"}),
         (POWERSHELL, "system.info", {}),
         ("echo", "echo.message.send", {"text": "ping"}),
@@ -163,3 +177,11 @@ def test_policy_file_can_allow_bypass_permissions(tmp_path: Path) -> None:
     )
 
     LocalPolicy.load(path).authorize(*_claude(permission_mode="bypassPermissions"))
+
+
+def test_relaxed_tools_still_cannot_inject_cli_options() -> None:
+    policy = LocalPolicy(allow_preapproved_tools=True)
+    policy.authorize(*_claude(allowed_tools=["Bash(git *)"]))
+
+    with pytest.raises(PolicyViolation):
+        policy.authorize(*_claude(allowed_tools=["--dangerously-skip-permissions"]))

@@ -42,8 +42,7 @@ def test_build_json_command_with_resume() -> None:
         "-p",
         "--output-format",
         "json",
-        "--resume",
-        "session-123",
+        "--resume=session-123",
         "--",
         "Summarize this project",
     ]
@@ -86,11 +85,32 @@ def test_build_stream_command_forwards_claude_cli_options() -> None:
         )
     )
 
-    assert args[-1] == "Fix the build"
-    assert "--resume" in args and args[args.index("--resume") + 1] == "session-123"
-    assert args[args.index("--permission-mode") + 1] == "acceptEdits"
-    assert args[args.index("--model") + 1] == "sonnet"
-    assert args[args.index("--allowed-tools") + 1 :][:2] == ["Bash(git *)", "Edit"]
+    assert args[-2:] == ["--", "Fix the build"]
+    assert "--resume=session-123" in args
+    assert "--permission-mode=acceptEdits" in args
+    assert "--model=sonnet" in args
+    assert "--allowed-tools=Bash(git *)" in args
+    assert "--allowed-tools=Edit" in args
+
+
+def test_every_cli_value_is_glued_to_its_option() -> None:
+    """A value is never a separate argv entry the CLI could read as an option."""
+    runner = ClaudeCodeCliRunner(CLAUDE_PATH)
+    hostile = "--dangerously-skip-permissions"
+
+    args = runner._build_stream_command(
+        ClaudeCodeExecutionRequest(
+            prompt="hi",
+            session_id=hostile,
+            model=hostile,
+            allowed_tools=(hostile,),
+            disallowed_tools=(hostile, "Bash"),
+        )
+    )
+
+    assert hostile not in args
+    assert "--disallowed-tools=Bash" in args
+    assert f"--disallowed-tools={hostile}" in args
 
 
 def test_extract_helpers_handle_supported_shapes() -> None:
@@ -181,7 +201,7 @@ def test_a_prompt_starting_with_a_dash_stays_a_prompt() -> None:
     )
 
     assert args[-2:] == ["--", "--dangerously-skip-permissions do it"]
-    assert args.index("--") > args.index("--allowed-tools")
+    assert args.index("--") > args.index("--allowed-tools=Read")
 
 
 @pytest.mark.parametrize("name", ["claude.cmd", "CLAUDE.CMD", "claude.bat"])

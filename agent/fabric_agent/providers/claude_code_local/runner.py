@@ -297,17 +297,18 @@ class ClaudeCodeCliRunner:
         request: ClaudeCodeExecutionRequest,
         mcp_config: Path | None = None,
     ) -> list[str]:
+        # Each value is glued to its option (`--opt=value`): the CLI then never
+        # reads it as an option of its own, even if it starts with `-`. Tools
+        # are passed one per option, the CLI accumulates repeated options.
         args: list[str] = []
         if request.session_id:
-            args.extend(["--resume", request.session_id])
+            args.append(f"--resume={request.session_id}")
         if request.permission_mode:
-            args.extend(["--permission-mode", request.permission_mode])
+            args.append(f"--permission-mode={request.permission_mode}")
         if request.model:
-            args.extend(["--model", request.model])
-        if request.allowed_tools:
-            args.extend(["--allowed-tools", *request.allowed_tools])
-        if request.disallowed_tools:
-            args.extend(["--disallowed-tools", *request.disallowed_tools])
+            args.append(f"--model={request.model}")
+        args.extend(f"--allowed-tools={tool}" for tool in request.allowed_tools)
+        args.extend(f"--disallowed-tools={tool}" for tool in request.disallowed_tools)
         if request.permission_prompt is not None and mcp_config is not None:
             # Routes every approval to the Fabric UI instead of denying it
             # outright, which is what `-p` does without a prompt tool. The config
