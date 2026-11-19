@@ -118,7 +118,8 @@ class MfaDevice(models.Model):
 
     One row per user, created at the first password step. `nonce` binds the
     short-lived `mfa_token` to this row: it is rotated whenever a login
-    completes, which makes the token single-use. Secrets are stored encrypted
+    completes (and after repeated wrong codes), which makes the token
+    single-use. Secrets are stored encrypted
     (`apps.api_auth.mfa`), never in clear. Deleted with the user (CASCADE).
     """
 
@@ -135,6 +136,13 @@ class MfaDevice(models.Model):
     #: Last accepted TOTP time-step: a code is never accepted twice.
     last_used_step = models.BigIntegerField(null=True, blank=True)
     nonce = models.CharField(max_length=64)
+    #: Wrong codes since the last success (FABRIC-3): every
+    #: `FABRIC_MFA_MAX_FAILURES_PER_TOKEN` of them spend the `mfa_token`, and
+    #: `FABRIC_MFA_LOCKOUT_THRESHOLD` lock the second factor.
+    failed_attempts = models.PositiveIntegerField(default=0)
+    #: Set when the factor locks; no code is accepted before. `reset_mfa`
+    #: lifts it at once (the row is deleted).
+    locked_until = models.DateTimeField(null=True, blank=True)
     confirmed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -50,7 +50,8 @@
       "invalidCode": "Codice non valido. Riprova.",
       "expired": "Accesso scaduto. Inserisci di nuovo la password.",
       "throttled": "Troppi tentativi. Attendi un minuto e riprova.",
-      "failed": "Verifica non riuscita. Riprova."
+      "failed": "Verifica non riuscita. Riprova.",
+      "locked": "Troppi codici non validi: l'accesso è bloccato per 24 ore (o finché l'amministratore non lo reimposta)."
     }
   },
   "notifications": {

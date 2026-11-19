@@ -28,6 +28,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from django.conf import settings
 
@@ -156,6 +157,33 @@ def notify_agent_offline(agent: Any, in_flight: int) -> None:
             f"L'agent {agent.name} s'est déconnecté "
             f"avec {in_flight} commande(s) en cours."
         ),
+    )
+
+
+def notify_mfa_failures(user: Any, *, failures: int, locked: bool) -> None:
+    """Wrong second-factor codes after a right password (FABRIC-3).
+
+    Never the codes themselves; the key is unique per alert because the
+    counter restarts after a success (a reused key would send nothing).
+    """
+    if locked:
+        title = "2e facteur verrouillé"
+        message = (
+            f"{failures} codes MFA invalides : le 2e facteur est verrouillé. "
+            "Si ce n'est pas vous, changez le mot de passe (reset_mfa pour débloquer)."
+        )
+    else:
+        title = "codes MFA invalides"
+        message = (
+            f"{failures} codes MFA invalides d'affilée après un bon mot de passe. "
+            "Si ce n'est pas vous, changez le mot de passe."
+        )
+    _send(
+        destination=_destination_for(user),
+        event="mfa_failures",
+        idempotency_key=f"fabric:mfa:{user.pk}:{failures}:{uuid4().hex}",
+        title=title,
+        message=message,
     )
 
 

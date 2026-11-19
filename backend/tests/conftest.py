@@ -22,9 +22,13 @@ def _channel_layer_settings(settings: Any) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _clear_throttle_state() -> Any:
+def _clear_throttle_state(settings: Any) -> Any:
     # DRF throttling counts in the cache, and every caller is throttled now:
-    # leaking counters across tests would make them order-dependent.
+    # leaking counters across tests would make them order-dependent. Never the
+    # Redis cache of a dev box: `clear()` there is a FLUSHDB of the channel layer.
+    settings.CACHES = {
+        "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}
+    }
     cache.clear()
     yield
     cache.clear()

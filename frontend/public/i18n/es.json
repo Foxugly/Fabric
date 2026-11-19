@@ -50,7 +50,8 @@
       "invalidCode": "Código no válido. Inténtalo de nuevo.",
       "expired": "Inicio de sesión caducado. Introduce de nuevo tu contraseña.",
       "throttled": "Demasiados intentos. Espera un minuto e inténtalo de nuevo.",
-      "failed": "Error de verificación. Inténtalo de nuevo."
+      "failed": "Error de verificación. Inténtalo de nuevo.",
+      "locked": "Demasiados códigos no válidos: el inicio de sesión queda bloqueado 24 horas (o hasta que el administrador lo restablezca)."
     }
   },
   "notifications": {
