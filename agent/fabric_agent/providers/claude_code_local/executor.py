@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from pathlib import Path
 from typing import Any
 
 from fabric_agent.permissions.gateway import PermissionGateway
+from fabric_agent.providers.claude_code_local import cli_arguments
 from fabric_agent.providers.claude_code_local.detector import (
     ClaudeCodeInstallationProbe,
     ClaudeCodeInstallationProbeLike,
@@ -104,11 +105,11 @@ class ClaudeCodeMessageExecutor:
 
         return ClaudeCodeExecutionRequest(
             prompt=prompt,
-            session_id=_optional_string(payload.get("session_id"), "session_id"),
+            session_id=_cli_value(cli_arguments.session_id, payload.get("session_id")),
             working_directory=_optional_directory(payload.get("working_directory")),
             timeout_seconds=_timeout_seconds(payload),
             permission_mode=_permission_mode(payload.get("permission_mode")),
-            model=_optional_string(payload.get("model"), "model"),
+            model=_cli_value(cli_arguments.model, payload.get("model")),
             allowed_tools=_tool_list(payload.get("allowed_tools"), "allowed_tools"),
             disallowed_tools=_tool_list(
                 payload.get("disallowed_tools"), "disallowed_tools"
@@ -197,16 +198,18 @@ def _permission_mode(value: Any) -> str | None:
     return permission_mode
 
 
+def _cli_value(validator: Callable[[Any], str | None], value: Any) -> str | None:
+    try:
+        return validator(value)
+    except ValueError as exc:
+        raise ClaudeCodePayloadError(str(exc)) from exc
+
+
 def _tool_list(value: Any, field_name: str) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if not isinstance(value, list) or not all(
-        isinstance(entry, str) and entry.strip() for entry in value
-    ):
-        raise ClaudeCodePayloadError(
-            f"{field_name} must be a list of non-empty strings"
-        )
-    return tuple(value)
+    try:
+        return cli_arguments.tool_list(value, field_name)
+    except ValueError as exc:
+        raise ClaudeCodePayloadError(str(exc)) from exc
 
 
 def _sanitize_raw_payload(payload: dict[str, Any]) -> dict[str, Any]:

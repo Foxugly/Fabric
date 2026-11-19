@@ -19,6 +19,8 @@ from fabric_agent.providers.claude_code_local.runner import (
     StreamDeltaEvent,
 )
 
+SESSION_ID = "0f8e2a3c-5b1d-4c6e-9a7f-1234567890ab"
+
 
 class InstallationProbe(Protocol):
     def probe(self) -> ClaudeCodeInstallation:
@@ -86,6 +88,33 @@ def test_message_executor_validates_payload() -> None:
         executor._build_request({"text": "ok", "allowed_tools": "Bash"})
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"session_id": "--dangerously-skip-permissions"},
+        {"session_id": "session-123"},
+        {"session_id": "0f8e2a3c-5b1d-4c6e-9a7f-1234567890ab\n"},
+        {"model": "--dangerously-skip-permissions"},
+        {"model": "sonnet --verbose"},
+        {"allowed_tools": ["--dangerously-skip-permissions"]},
+        {"disallowed_tools": ["--dangerously-skip-permissions"]},
+        {"disallowed_tools": ["Bash", "-p"]},
+        {"disallowed_tools": ["Bash,Edit"]},
+        {"disallowed_tools": ["Bash\nEdit"]},
+        {"disallowed_tools": ["Bash"] * 65},
+    ],
+)
+def test_message_executor_refuses_values_that_could_become_cli_options(
+    payload: dict[str, Any],
+) -> None:
+    executor = ClaudeCodeMessageExecutor(
+        installation_probe=StubInstallationProbe(Path("C:/Tools/claude.exe"))
+    )
+
+    with pytest.raises(ClaudeCodePayloadError):
+        executor._build_request({"text": "ok", **payload})
+
+
 def test_message_executor_maps_claude_cli_options() -> None:
     executor = ClaudeCodeMessageExecutor(
         installation_probe=StubInstallationProbe(Path("C:/Tools/claude.exe"))
@@ -94,18 +123,23 @@ def test_message_executor_maps_claude_cli_options() -> None:
     request = executor._build_request(
         {
             "text": "ship it",
-            "session_id": "session-123",
+            "session_id": SESSION_ID,
             "permission_mode": "acceptEdits",
             "model": "sonnet",
             "allowed_tools": ["Bash(git *)", "Edit"],
+            "disallowed_tools": ["mcp__github__create_issue", "Read(./secrets/**)"],
             "_fabric_timeout_seconds": 900,
         }
     )
 
-    assert request.session_id == "session-123"
+    assert request.session_id == SESSION_ID
     assert request.permission_mode == "acceptEdits"
     assert request.model == "sonnet"
     assert request.allowed_tools == ("Bash(git *)", "Edit")
+    assert request.disallowed_tools == (
+        "mcp__github__create_issue",
+        "Read(./secrets/**)",
+    )
     assert request.timeout_seconds == 900
 
 
