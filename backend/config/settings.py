@@ -156,7 +156,11 @@ if REDIS_URL:
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
-            "CONFIG": {"hosts": [REDIS_URL]},
+            # redis-py 8 applies a default 5 s socket read timeout: exactly
+            # channels-redis' blocking BZPOPMIN window (brpop_timeout = 5). An idle
+            # receive() then raised "Timeout reading from ..." and every WebSocket
+            # died with a 1011. None restores redis-py 7's behaviour (no timeout).
+            "CONFIG": {"hosts": [{"address": REDIS_URL, "socket_timeout": None}]},
         }
     }
 elif not DEBUG:

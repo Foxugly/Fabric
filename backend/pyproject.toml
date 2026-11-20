@@ -20,11 +20,13 @@ dependencies = [
   "djangorestframework-simplejwt>=5.3,<6.0",
   "channels>=4.1,<5.0",
   "channels-redis>=4.2,<5.0",
-  # redis-py 8 enables RESP3 by default, which channels-redis 4.3 does not
-  # support: its blocking group reads fail with a bogus
-  # "Timeout reading from 127.0.0.1:6379" and every WebSocket dies with a 1011.
-  # channels-redis declares no upper bound, so this pin is ours to hold.
-  "redis>=5.0,<9.0",
+  # redis-py 8 applies a default 5 s socket read timeout, exactly channels-redis'
+  # blocking BZPOPMIN window: an idle receive() raised a bogus "Timeout reading
+  # from 127.0.0.1:6379" and every WebSocket died with a 1011 (not RESP3, as first
+  # thought: protocol=2 fails the same way). config/settings.py sets
+  # socket_timeout=None on the channel layer, which makes redis-py 8 safe. The
+  # floor moves production (pip install -e without --upgrade).
+  "redis>=8.1,<9.0",
   "psycopg[binary]>=3.2,<4.0",
   "sentry-sdk[django]>=2.0,<3.0",
   # TOTP secrets are encrypted at rest (Fernet, key derived with HKDF).
