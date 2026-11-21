@@ -32,12 +32,14 @@ if [[ ! -x "${VENV}/bin/python" ]]; then
     python3 -m venv "${VENV}"
 fi
 "${VENV}/bin/python" -m pip install --quiet --upgrade pip
-# pyproject.toml declares ranges, not pins. Without --upgrade, pip keeps any
-# installed version that still satisfies a range, so production stayed on
-# Django 6.1.2 while CI (fresh install) tested 6.1.3 and its security fixes.
-# Eager upgrade makes every deploy install what CI tested: the newest release
-# allowed by each range, dependencies of dependencies included.
-"${VENV}/bin/python" -m pip install --quiet --upgrade --upgrade-strategy eager -e "${BACKEND_DIR}"
+# backend/requirements.txt is the hash-pinned lock that CI tests (regenerate
+# with the uv command in its header). Installing it with --require-hashes means
+# production runs exactly those versions, nothing resolved on this host and no
+# artifact that differs from what was hashed. The project itself goes in with
+# --no-deps; pip check fails the deploy if the lock misses a dependency.
+"${VENV}/bin/python" -m pip install --quiet --require-hashes --no-deps -r "${BACKEND_DIR}/requirements.txt"
+"${VENV}/bin/python" -m pip install --quiet --no-deps -e "${BACKEND_DIR}"
+"${VENV}/bin/python" -m pip check
 
 cd "${BACKEND_DIR}"
 

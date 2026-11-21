@@ -48,6 +48,7 @@ jobs:
       - name: Backend
         working-directory: backend
         run: |
+          pip install --require-hashes -r requirements.txt
           pip install -e ".[dev]"
           ruff check .
           mypy .

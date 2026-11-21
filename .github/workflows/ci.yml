@@ -94,7 +94,19 @@ jobs:
           cache: pip
       - name: Install
         working-directory: backend
-        run: pip install -e ".[dev]"
+        # The lock first, so tests run on the exact versions production gets.
+        run: |
+          pip install --require-hashes -r requirements.txt
+          pip install -e ".[dev]"
+      # Same install as deploy/ssm-deploy.sh, in a clean venv: proves the lock is
+      # complete and satisfies every range in pyproject.toml.
+      - name: Lock matches pyproject
+        working-directory: backend
+        run: |
+          python -m venv /tmp/lock-check
+          /tmp/lock-check/bin/pip install --quiet --require-hashes --no-deps -r requirements.txt
+          /tmp/lock-check/bin/pip install --quiet --no-deps -e .
+          /tmp/lock-check/bin/pip check
       - name: Lint
         working-directory: backend
         run: ruff check .
@@ -149,9 +161,9 @@ jobs:
         run: npx ng build --configuration production
 
   # Audit des dépendances Python contre la base d'avis PyPI (OSV) : le job échoue
-  # sur toute vulnérabilité connue. Fabric n'a pas de requirements.txt : le backend
-  # et l'agent s'installent depuis pyproject (`pip install -e ".[dev]"`, plages de
-  # versions, comme au déploiement). On audite donc l'ENVIRONNEMENT RÉSOLU de chacun
+  # sur toute vulnérabilité connue. Le backend s'installe depuis son verrou
+  # (backend/requirements.txt, hashes, comme au déploiement) puis l'extra dev ;
+  # l'agent depuis pyproject (plages). On audite donc l'ENVIRONNEMENT RÉSOLU de chacun
   # (dépendances transitives et extra dev compris) dans un venv jetable ; outil épinglé.
   # Exceptions : .pip-audit-ignore, une ligne « ID AAAA-MM-JJ # raison » ;
   # une exception expirée fait échouer le job — à réexaminer, pas à oublier.
@@ -167,6 +179,7 @@ jobs:
           cache: pip
           cache-dependency-path: |
             backend/pyproject.toml
+            backend/requirements.txt
             agent/pyproject.toml
 
       - name: Install pip-audit (version figée)
@@ -191,6 +204,9 @@ jobs:
           for projet in backend agent; do
             echo "::group::pip-audit $projet"
             python -m venv --upgrade-deps "/tmp/audit-$projet"
+            if [ -f "$projet/requirements.txt" ]; then
+              "/tmp/audit-$projet/bin/pip" install --quiet --require-hashes -r "$projet/requirements.txt"
+            fi
             "/tmp/audit-$projet/bin/pip" install --quiet -e "./$projet[dev]"
             pip-audit --progress-spinner off --skip-editable \
               --path "/tmp/audit-$projet/lib/python3.12/site-packages" "${ignore[@]}"
