@@ -11,10 +11,10 @@ dependencies = [
   # daphne is in INSTALLED_APPS (it provides the ASGI runserver), so it is a
   # runtime dependency, not a development one.
   "daphne>=4.1,<5.0",
-  # The floor is what moves production: ssm-deploy.sh runs `pip install -e`
-  # without --upgrade, so an installed version that still satisfies the range is
-  # kept. DRF 3.18 is the first release that supports Django 6.1.
-  "Django>=6.1.2,<6.2",
+  # ssm-deploy.sh upgrades eagerly, so production follows the newest release in
+  # each range. The floor still documents the minimum: 6.1.3 carries six security
+  # fixes. DRF 3.18 is the first release that supports Django 6.1.
+  "Django>=6.1.3,<6.2",
   "django-cors-headers>=4.6,<5.0",
   "djangorestframework>=3.18,<4.0",
   "djangorestframework-simplejwt>=5.3,<6.0",
@@ -24,8 +24,7 @@ dependencies = [
   # blocking BZPOPMIN window: an idle receive() raised a bogus "Timeout reading
   # from 127.0.0.1:6379" and every WebSocket died with a 1011 (not RESP3, as first
   # thought: protocol=2 fails the same way). config/settings.py sets
-  # socket_timeout=None on the channel layer, which makes redis-py 8 safe. The
-  # floor moves production (pip install -e without --upgrade).
+  # socket_timeout=None on the channel layer, which makes redis-py 8 safe.
   "redis>=8.1,<9.0",
   "psycopg[binary]>=3.2,<4.0",
   "sentry-sdk[django]>=2.0,<3.0",

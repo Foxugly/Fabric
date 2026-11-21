@@ -32,7 +32,12 @@ if [[ ! -x "${VENV}/bin/python" ]]; then
     python3 -m venv "${VENV}"
 fi
 "${VENV}/bin/python" -m pip install --quiet --upgrade pip
-"${VENV}/bin/python" -m pip install --quiet -e "${BACKEND_DIR}"
+# pyproject.toml declares ranges, not pins. Without --upgrade, pip keeps any
+# installed version that still satisfies a range, so production stayed on
+# Django 6.1.2 while CI (fresh install) tested 6.1.3 and its security fixes.
+# Eager upgrade makes every deploy install what CI tested: the newest release
+# allowed by each range, dependencies of dependencies included.
+"${VENV}/bin/python" -m pip install --quiet --upgrade --upgrade-strategy eager -e "${BACKEND_DIR}"
 
 cd "${BACKEND_DIR}"
 
