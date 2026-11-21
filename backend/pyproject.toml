@@ -11,9 +11,9 @@ dependencies = [
   # daphne is in INSTALLED_APPS (it provides the ASGI runserver), so it is a
   # runtime dependency, not a development one.
   "daphne>=4.1,<5.0",
-  # ssm-deploy.sh upgrades eagerly, so production follows the newest release in
-  # each range. The floor still documents the minimum: 6.1.3 carries six security
-  # fixes. DRF 3.18 is the first release that supports Django 6.1.
+  # Ranges here, exact versions in requirements.txt (the hash-pinned lock that
+  # production installs). 6.1.3 carries six security fixes. DRF 3.18 is the
+  # first release that supports Django 6.1.
   "Django>=6.1.3,<6.2",
   "django-cors-headers>=4.6,<5.0",
   "djangorestframework>=3.18,<4.0",
