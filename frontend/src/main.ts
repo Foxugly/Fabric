@@ -6,7 +6,7 @@ import { providePrimeNG } from 'primeng/config';
 import Aura from '@primeuix/themes/aura';
 
 import { AppComponent } from './app/app.component';
-import { initSentry, sentryProviders } from './app/sentry';
+import { captureException, initSentry, sentryProviders } from './app/sentry';
 import { authInterceptor } from './app/services/auth.interceptor';
 import { AuthService } from './app/services/auth.service';
 import { AVAILABLE_LANGS, DEFAULT_LANG, FALLBACK_LANG } from './app/i18n/available-languages';
@@ -75,6 +75,7 @@ bootstrapApplication(AppComponent, {
     ...(sentryEnabled ? sentryProviders() : []),
   ],
 }).catch((error: unknown) => {
+  captureException(error);
   reportRuntimeProblem(
     `Failed to bootstrap Fabric frontend: ${
       error instanceof Error ? error.message : String(error)
