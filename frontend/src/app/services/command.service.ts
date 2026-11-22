@@ -1,7 +1,7 @@
 import { inject, Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { merge, Observable, of, Subject, timer } from 'rxjs';
-import { shareReplay, switchMap } from 'rxjs/operators';
+import { EMPTY, merge, Observable, of, Subject, timer } from 'rxjs';
+import { catchError, shareReplay, switchMap } from 'rxjs/operators';
 
 import { Command, CreateCommandRequest, PermissionRequest } from '../models';
 import { ApiBaseService } from './api-base.service';
@@ -19,7 +19,10 @@ export class CommandService {
       session === null
         ? of<Command[]>([])
         : merge(timer(0, 3000), this.refreshSubject).pipe(
-            switchMap(() => this.listCommands()),
+            // A failed poll (502 during a deploy, network drop) skips this
+            // tick instead of killing the polling stream with an unhandled
+            // error (Sentry FABRIC-FRONTEND-1).
+            switchMap(() => this.listCommands().pipe(catchError(() => EMPTY))),
           ),
     ),
     shareReplay({ bufferSize: 1, refCount: true }),

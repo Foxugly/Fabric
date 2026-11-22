@@ -9,10 +9,11 @@ import {
   effect,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom, Subscription } from 'rxjs';
-import { TerminalModule, TerminalService } from 'primeng/terminal';
+import { Terminal, TerminalModule, TerminalService } from 'primeng/terminal';
 
 import { Agent, AuthSession, Command, CommandStatus, FabricEvent } from './models';
 import { NotificationsPanelComponent } from './notifications-panel.component';
@@ -714,6 +715,7 @@ export class AppComponent implements OnDestroy {
   private readonly eventStreamService = inject(EventStreamService);
   private readonly runtimeErrorService = inject(RuntimeErrorService);
   private readonly terminalService = inject(TerminalService);
+  private readonly terminal = viewChild(Terminal);
   private readonly hostElement = inject(ElementRef<HTMLElement>);
   private readonly subscriptions = new Subscription();
 
@@ -1104,7 +1106,7 @@ export class AppComponent implements OnDestroy {
       error: (error) => {
         const message = this.extractHttpError(error, 'Cancel failed');
         this.terminalError.set(message);
-        this.terminalService.sendResponse(message);
+        this.sendTerminalResponse(message);
       },
     });
   }
@@ -1204,7 +1206,7 @@ export class AppComponent implements OnDestroy {
 
     const match = /^(allow|deny|y|n)(?:\s+([\s\S]*))?$/i.exec(command.trim());
     if (match === null) {
-      this.terminalService.sendResponse(
+      this.sendTerminalResponse(
         'Claude attend une décision. Répondez `allow` ou `deny [raison]`, ' +
           'ou utilisez les boutons.',
       );
@@ -1261,7 +1263,7 @@ export class AppComponent implements OnDestroy {
   private async handleTerminalCommand(command: string): Promise<void> {
     const trimmed = command.trim();
     if (trimmed.length === 0) {
-      this.terminalService.sendResponse('');
+      this.sendTerminalResponse('');
       return;
     }
 
@@ -1286,7 +1288,7 @@ export class AppComponent implements OnDestroy {
 
     const sessionId = this.powerShellSessionId();
     if (sessionId === null) {
-      this.terminalService.sendResponse('Open a session first.');
+      this.sendTerminalResponse('Open a session first.');
       return;
     }
 
@@ -1311,7 +1313,7 @@ export class AppComponent implements OnDestroy {
 
     if (subcommand === 'on' || subcommand === 'off') {
       this.claudeMode.set(subcommand === 'on');
-      this.terminalService.sendResponse(
+      this.sendTerminalResponse(
         subcommand === 'on'
           ? 'Claude mode on: every line goes to Claude. !<command> runs PowerShell, claude:off to leave.'
           : 'Claude mode off: lines go to PowerShell again.',
@@ -1321,19 +1323,19 @@ export class AppComponent implements OnDestroy {
 
     if (subcommand === 'new') {
       this.claudeSessionId.set(null);
-      this.terminalService.sendResponse('Claude session reset. The next prompt starts a new one.');
+      this.sendTerminalResponse('Claude session reset. The next prompt starts a new one.');
       return true;
     }
 
     if (subcommand === 'mode') {
       if (!CLAUDE_PERMISSION_MODES.has(argument)) {
-        this.terminalService.sendResponse(
+        this.sendTerminalResponse(
           `Unknown permission mode. Use one of: ${[...CLAUDE_PERMISSION_MODES].join(', ')}.`,
         );
         return true;
       }
       this.claudePermissionMode.set(argument);
-      this.terminalService.sendResponse(`Claude permission mode set to ${argument}.`);
+      this.sendTerminalResponse(`Claude permission mode set to ${argument}.`);
       return true;
     }
 
@@ -1343,14 +1345,14 @@ export class AppComponent implements OnDestroy {
     }
 
     if (subcommand !== '') {
-      this.terminalService.sendResponse(
+      this.sendTerminalResponse(
         'Unknown claude subcommand. Use claude:on, claude:off, claude:status, claude:new or claude:mode <mode>.',
       );
       return true;
     }
 
     if (argument.length === 0) {
-      this.terminalService.sendResponse([
+      this.sendTerminalResponse([
         'Usage: claude <prompt>',
         `  session          : ${this.claudeSessionId() ?? 'new on next prompt'}`,
         `  working directory: ${this.workingDirectory() || '(agent default)'}`,
@@ -1387,7 +1389,7 @@ export class AppComponent implements OnDestroy {
   private async runClaudeSessionStatus(): Promise<void> {
     const agent = this.selectedAgent();
     if (agent === null) {
-      this.terminalService.sendResponse('No agent selected.');
+      this.sendTerminalResponse('No agent selected.');
       return;
     }
 
@@ -1406,11 +1408,11 @@ export class AppComponent implements OnDestroy {
       if (completed.status !== 'succeeded') {
         throw new Error(completed.error || 'Claude status failed');
       }
-      this.terminalService.sendResponse(JSON.stringify(completed.result, null, 2));
+      this.sendTerminalResponse(JSON.stringify(completed.result, null, 2));
     } catch (error) {
       const message = this.extractHttpError(error, 'Claude status failed');
       this.terminalError.set(message);
-      this.terminalService.sendResponse(message);
+      this.sendTerminalResponse(message);
     } finally {
       this.pendingAction.set(false);
     }
@@ -1425,11 +1427,11 @@ export class AppComponent implements OnDestroy {
   ): Promise<void> {
     const agent = this.selectedAgent();
     if (agent === null) {
-      this.terminalService.sendResponse('No agent selected.');
+      this.sendTerminalResponse('No agent selected.');
       return;
     }
     if (this.activeCommandId() !== null) {
-      this.terminalService.sendResponse('A command is already running. Press Cancel or Ctrl+C.');
+      this.sendTerminalResponse('A command is already running. Press Cancel or Ctrl+C.');
       return;
     }
 
@@ -1451,7 +1453,7 @@ export class AppComponent implements OnDestroy {
     } catch (error) {
       const message = this.extractHttpError(error, failureLabel);
       this.terminalError.set(message);
-      this.terminalService.sendResponse(message);
+      this.sendTerminalResponse(message);
       this.resetStreamingState();
     }
   }
@@ -1483,7 +1485,7 @@ export class AppComponent implements OnDestroy {
       }
 
       if (announceInTerminal) {
-        this.terminalService.sendResponse(
+        this.sendTerminalResponse(
           action === 'windows_powershell.session.create'
             ? `Session opened in ${this.workingDirectory()}.`
             : 'Session closed.',
@@ -1493,7 +1495,7 @@ export class AppComponent implements OnDestroy {
       const message = this.extractHttpError(error, 'Session command failed');
       this.terminalError.set(message);
       if (announceInTerminal) {
-        this.terminalService.sendResponse(message);
+        this.sendTerminalResponse(message);
       }
     } finally {
       this.pendingAction.set(false);
@@ -1626,7 +1628,7 @@ export class AppComponent implements OnDestroy {
     const normalized = command.trim().toLowerCase();
 
     if (normalized === 'help') {
-      this.terminalService.sendResponse([
+      this.sendTerminalResponse([
         'Local commands:',
         '  open   - open a PowerShell session',
         '  close  - close the current session',
@@ -1662,7 +1664,7 @@ export class AppComponent implements OnDestroy {
 
     if (normalized === 'cancel') {
       if (this.activeCommandId() === null) {
-        this.terminalService.sendResponse('No active command.');
+        this.sendTerminalResponse('No active command.');
         return true;
       }
       this.cancelActiveCommand();
@@ -1671,12 +1673,12 @@ export class AppComponent implements OnDestroy {
 
     if (normalized === 'open') {
       if (this.powerShellSessionId() !== null) {
-        this.terminalService.sendResponse('Session already open.');
+        this.sendTerminalResponse('Session already open.');
         return true;
       }
       const agent = this.selectedAgent();
       if (agent === null) {
-        this.terminalService.sendResponse('No agent selected.');
+        this.sendTerminalResponse('No agent selected.');
         return true;
       }
       void this.runSessionCommand(agent, 'windows_powershell.session.create', {
@@ -1687,13 +1689,13 @@ export class AppComponent implements OnDestroy {
 
     if (normalized === 'close' || normalized === 'exit') {
       if (this.powerShellSessionId() === null) {
-        this.terminalService.sendResponse('No session is open.');
+        this.sendTerminalResponse('No session is open.');
         return true;
       }
       const agent = this.selectedAgent();
       const sessionId = this.powerShellSessionId();
       if (agent === null || sessionId === null) {
-        this.terminalService.sendResponse('No session is open.');
+        this.sendTerminalResponse('No session is open.');
         return true;
       }
       void this.runSessionCommand(agent, 'windows_powershell.session.close', {
@@ -1782,14 +1784,14 @@ export class AppComponent implements OnDestroy {
 
   private renderTerminalResult(command: Command): void {
     if (command.status !== 'succeeded') {
-      this.terminalService.sendResponse(this.commandFailureText(command));
+      this.sendTerminalResponse(this.commandFailureText(command));
       return;
     }
 
     if (command.provider === CLAUDE_PROVIDER) {
       const text = (command.result as Record<string, unknown>)['text'];
       this.renderedResponse = typeof text === 'string' ? text : '';
-      this.terminalService.sendResponse(this.renderedResponse || '(no output)');
+      this.sendTerminalResponse(this.renderedResponse || '(no output)');
       return;
     }
 
@@ -1808,7 +1810,7 @@ export class AppComponent implements OnDestroy {
 
     this.renderedResponse = response;
     if (this.renderedResponse.length > 0) {
-      this.terminalService.sendResponse(this.renderedResponse);
+      this.sendTerminalResponse(this.renderedResponse);
     }
   }
 
@@ -1908,10 +1910,30 @@ export class AppComponent implements OnDestroy {
     this.focusTerminalInput();
   }
 
+  /**
+   * PrimeNG's terminal writes every response onto its last command row and
+   * throws when there is none — which is the case right after a page reload,
+   * when the resumed command's output arrives before the user typed anything
+   * (Sentry FABRIC-FRONTEND-2). Seed an empty row so the output is shown.
+   */
+  private sendTerminalResponse(response: string): void {
+    if (!response) {
+      return;
+    }
+    const terminal = this.terminal();
+    if (terminal === undefined) {
+      return;
+    }
+    if (terminal.commands.length === 0) {
+      terminal.commands.push({ text: '', response: '' });
+    }
+    this.terminalService.sendResponse(response);
+  }
+
   private pushTerminalResponse(): void {
     this.renderedResponse = this.composeRenderedResponse();
     if (this.renderedResponse.length > 0) {
-      this.terminalService.sendResponse(this.renderedResponse);
+      this.sendTerminalResponse(this.renderedResponse);
       this.scheduleAutoScroll();
     }
   }
@@ -1921,7 +1943,7 @@ export class AppComponent implements OnDestroy {
     this.renderedResponse = this.renderedResponse.length > 0
       ? `${this.renderedResponse}\n${line}`
       : line;
-    this.terminalService.sendResponse(this.renderedResponse);
+    this.sendTerminalResponse(this.renderedResponse);
     this.scheduleAutoScroll();
   }
 
