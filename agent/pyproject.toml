@@ -10,7 +10,9 @@ requires-python = ">=3.12"
 dependencies = [
   # A curated CA bundle: the OS trust store on the machines this agent runs on
   # cannot be relied upon (see `_ssl_context` in transport/client.py).
-  "certifi>=2024.7.4",
+  # >=2026.10.18: older bundles still trust emSign roots whose intermediate
+  # CA keys were compromised (PYSEC-2026-4320).
+  "certifi>=2026.10.18",
   "websockets>=13.0,<18.0",
 ]
 
