@@ -254,7 +254,7 @@ Le pipeline suppose que le dépôt existe déjà (§3.11 gotcha 5).
 sudo -u django git clone https://github.com/Foxugly/Fabric.git \
   /var/www/django_websites/Fabric
 sudo git config --global --add safe.directory /var/www/django_websites/Fabric
-sudo -u django python3 -m venv /var/www/django_websites/Fabric/backend/.venv
+sudo -u django /usr/bin/python3.14 -m venv /var/www/django_websites/Fabric/backend/.venv  # deadsnakes, pas le python3 système (3.12)
 
 # Unités + sudoers : root, hors-bande, depuis le blob git (jamais depuis l'arbre)
 cd /var/www/django_websites/Fabric
@@ -276,6 +276,12 @@ sudo head -c 40 /run/fabric/.env   # doit montrer des variables, pas une erreur
 sudo systemctl enable fabric-asgi
 sudo systemctl enable --now fabric-purge.timer   # purge quotidienne (FABRIC_RETENTION_DAYS, défaut 30)
 ```
+
+Python : `backend/.venv` tourne sur `/usr/bin/python3.14` (deadsnakes). À chaque
+déploiement, `deploy/ssm-deploy.sh` (lancé par `ssm-remote.sh` après le `git reset`)
+reconstruit ce venv **sur place** s'il manque ou s'il est sur une autre version
+(l'ancien gardé en `.venv.prev`, remis en place si l'installation échoue) ;
+`ssm-remote.sh` relance ensuite `fabric-asgi`. L'agent (PC Windows) n'est pas concerné.
 
 ## 7. Sentry (§3.8)
 
