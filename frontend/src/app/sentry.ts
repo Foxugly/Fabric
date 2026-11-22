@@ -17,7 +17,7 @@ import { scrubBreadcrumb, scrubEvent } from './sentry-scrub';
  * loading promise and sent once it resolves.
  */
 
-type SentrySdk = typeof import('@sentry/angular');
+type SentrySdk = typeof import('./sentry-sdk');
 
 const PLACEHOLDER_PREFIX = '__FABRIC_';
 
@@ -54,7 +54,7 @@ export function initSentry(): boolean {
   globalThis.addEventListener('error', onError);
   globalThis.addEventListener('unhandledrejection', onRejection);
 
-  sentryReady = import('@sentry/angular')
+  sentryReady = import('./sentry-sdk')
     .then((Sentry) => {
       Sentry.init({
         dsn,
