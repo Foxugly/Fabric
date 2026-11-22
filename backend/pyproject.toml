@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "fabric-backend"
 version = "0.1.0"
 description = "Fabric backend"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
   # daphne is in INSTALLED_APPS (it provides the ASGI runserver), so it is a
   # runtime dependency, not a development one.
@@ -62,14 +62,14 @@ asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 88
-target-version = "py312"
+target-version = "py314"
 exclude = ["apps/*/migrations/*.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "DJ"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.14"
 plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
 strict = true
 exclude = ["migrations/"]

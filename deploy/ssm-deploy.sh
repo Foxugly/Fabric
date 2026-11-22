@@ -28,8 +28,26 @@ while IFS='=' read -r key value; do
 done < "${ENV_FILE}"
 
 echo "== backend deps =="
-if [[ ! -x "${VENV}/bin/python" ]]; then
-    python3 -m venv "${VENV}"
+# The venv must run on $PYTHON (deadsnakes python3.14, root-owned in /usr/bin;
+# the system python3 stays 3.12). A missing venv, or one on another version, is
+# rebuilt at its final path — never built elsewhere and moved, since
+# console-script shebangs (.venv/bin/daphne, used by fabric-asgi) hard-code the
+# venv path. The old one is kept as .venv.prev and put back if the rebuild
+# fails. fabric-asgi is restarted by ssm-remote.sh after this script;
+# fabric-purge (timer oneshot) picks the new venv up on its next run.
+PYTHON=/usr/bin/python3.14
+PY_WANT="$("$PYTHON" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+PY_HAVE="$("${VENV}/bin/python" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo none)"
+if [[ "${PY_HAVE}" != "${PY_WANT}" ]]; then
+    echo ">>> Rebuilding the venv: Python ${PY_HAVE} -> ${PY_WANT}..."
+    rm -rf "${VENV}.prev"
+    if [[ -e "${VENV}" ]]; then mv "${VENV}" "${VENV}.prev"; fi
+    if ! { "$PYTHON" -m venv "${VENV}"            && "${VENV}/bin/python" -m pip install --quiet --require-hashes --no-deps -r "${BACKEND_DIR}/requirements.txt"            && "${VENV}/bin/python" -m pip install --quiet --no-deps -e "${BACKEND_DIR}"            && "${VENV}/bin/python" -m pip check; }; then
+        echo "ERROR: venv rebuild failed; restoring the previous venv." >&2
+        rm -rf "${VENV}"
+        if [[ -e "${VENV}.prev" ]]; then mv "${VENV}.prev" "${VENV}"; fi
+        exit 1
+    fi
 fi
 "${VENV}/bin/python" -m pip install --quiet --upgrade pip
 # backend/requirements.txt is the hash-pinned lock that CI tests (regenerate
