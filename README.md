@@ -114,12 +114,13 @@ concerné (il s'authentifie par son jeton `Authorization: Bearer`).
 
 ```text
 fabric/
-├── agent/
-├── backend/
-├── docker/
+├── agent/      agent Windows (Python) — tourne sur le PC
+├── backend/    Django + Channels (daphne, unité fabric-asgi)
+├── deploy/     unités systemd, nginx, sudoers, scripts SSM
 ├── docs/
-├── frontend/
-└── shared/
+├── frontend/   SPA Angular
+├── scripts/
+└── shared/     protocole JSON partagé agent <-> backend
 ```
 
 ## Démarrage rapide

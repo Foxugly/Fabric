@@ -111,10 +111,9 @@ Le provider `echo` reste comme banc d'essai du transport.
 
 ## Reste à faire
 
-1. **pont d'autorisation des outils** : brancher `--permission-prompt-tool` sur
-   un serveur MCP local pour que les demandes d'autorisation remontent dans
-   l'interface web, au lieu du `acceptEdits` global. `waiting_user_action`
-   existe déjà côté modèle pour porter cet état ;
+1. ~~**pont d'autorisation des outils**~~ — fait : `--permission-prompt-tool`
+   relaie les demandes jusqu'au terminal web, voir
+   [permission-bridge.md](permission-bridge.md) ;
 2. **session persistante** via `--input-format stream-json`, au lieu d'un
    processus `claude -p` par tour ;
 3. **interface de conversation** : `apps/conversations` transmet désormais la
