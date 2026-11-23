@@ -38,7 +38,10 @@ Points de cadrage :
 
 Implémenté et vérifié de bout en bout :
 
-- monorepo, backend Django + Channels, agent Python, frontend Angular ;
+- monorepo, backend Django + Channels, agent Python, frontend Angular 21 +
+  **Optimus UI** (`@openng/optimus-ui`, fork MIT de PrimeNG 21 ; PrimeNG ≥ 22,
+  sous licence commerciale, est interdit dans la flotte — voir
+  `STANDARD-frontend-layout.md` « Bibliothèque UI » dans `foxugly-ops`) ;
 - modèles `Agent`, `Command`, `CommandEvent`, `Conversation`, `Message` ;
 - protocole JSON versionné partagé, WebSocket agent authentifié par token ;
 - provider **`claude_code_local`** : `session.status` et `message.send` avec
@@ -118,7 +121,7 @@ fabric/
 ├── backend/    Django + Channels (daphne, unité fabric-asgi)
 ├── deploy/     unités systemd, nginx, sudoers, scripts SSM
 ├── docs/
-├── frontend/   SPA Angular
+├── frontend/   SPA Angular (Optimus UI)
 ├── scripts/
 └── shared/     protocole JSON partagé agent <-> backend
 ```

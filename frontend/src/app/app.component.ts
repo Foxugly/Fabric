@@ -13,7 +13,7 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom, Subscription } from 'rxjs';
-import { Terminal, TerminalModule, TerminalService } from 'primeng/terminal';
+import { Terminal, TerminalModule, TerminalService } from '@openng/optimus-ui/terminal';
 
 import { Agent, AuthSession, Command, CommandStatus, FabricEvent } from './models';
 import { NotificationsPanelComponent } from './notifications-panel.component';
@@ -1911,7 +1911,7 @@ export class AppComponent implements OnDestroy {
   }
 
   /**
-   * PrimeNG's terminal writes every response onto its last command row and
+   * The Optimus UI terminal writes every response onto its last command row and
    * throws when there is none — which is the case right after a page reload,
    * when the resumed command's output arrives before the user typed anything
    * (Sentry FABRIC-FRONTEND-2). Seed an empty row so the output is shown.

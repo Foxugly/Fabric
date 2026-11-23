@@ -9,7 +9,7 @@ import { LanguageService } from './language.service';
  * Sélecteur de langue (STANDARD-frontend-layout.md §5).
  *
  * Le standard impose un trigger qui affiche **uniquement le code langue** en
- * majuscules — jamais de globe ni de drapeau. Fabric n'a pas de shell PrimeNG
+ * majuscules — jamais de globe ni de drapeau. Fabric n'a pas de shell Optimus UI
  * ni de topmenu : on reste donc sur un `<select>` natif plutôt que d'importer
  * une popup pour un seul contrôle. Il porte le code en majuscules, respecte la
  * règle et reste accessible au clavier sans code supplémentaire.

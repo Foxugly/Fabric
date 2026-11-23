@@ -2,8 +2,8 @@ import { bootstrapApplication } from '@angular/platform-browser';
 import { inject, provideAppInitializer, isDevMode } from '@angular/core';
 import { provideTransloco } from '@jsverse/transloco';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
-import { providePrimeNG } from 'primeng/config';
-import Aura from '@primeuix/themes/aura';
+import { provideOptimus } from '@openng/optimus-ui/config';
+import Aura from '@openng/optimus-ui-themes/aura';
 
 import { AppComponent } from './app/app.component';
 import { captureException, initSentry, sentryProviders } from './app/sentry';
@@ -67,7 +67,7 @@ bootstrapApplication(AppComponent, {
     // Restaure la session depuis le cookie HttpOnly de refresh (le jeton
     // d'acces ne vit qu'en memoire) avant le premier rendu.
     provideAppInitializer(() => inject(AuthService).restore()),
-    providePrimeNG({
+    provideOptimus({
       theme: {
         preset: Aura,
       },
