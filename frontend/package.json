@@ -19,13 +19,13 @@
     "@angular/platform-browser": "^22.3.0",
     "@angular/router": "^22.3.0",
     "@jsverse/transloco": "^8.4.0",
+    "@openng/icons": "^1.0.0",
+    "@openng/optimus-ui": "^2.0.2",
+    "@openng/optimus-ui-themes": "^2.0.2",
     "@sentry/angular": "^11.16.0",
     "rxjs": "^7.8.2",
     "tslib": "^2.9.1",
-    "zone.js": "^0.16.2",
-    "@openng/optimus-ui": "^2.0.2",
-    "@openng/icons": "^1.0.0",
-    "@openng/optimus-ui-themes": "^2.0.2"
+    "zone.js": "^0.16.3"
   },
   "devDependencies": {
     "@angular/build": "^22.3.0",
