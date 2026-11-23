@@ -79,6 +79,10 @@ export function initSentry(): boolean {
           queues: false,
           graphQL: { document: false, variables: false },
         },
+        // SDK 11 streams spans by default, which ignores `beforeSendTransaction`
+        // (console warning): keep v10's static lifecycle so the scrubber below
+        // still applies.
+        traceLifecycle: 'static',
         tracesSampleRate: 0,
         // Tickets, JWT, Bearer values, request bodies and console breadcrumbs
         // are scrubbed before anything leaves the browser (sentry-scrub.ts).
