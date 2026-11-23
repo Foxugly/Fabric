@@ -1,4 +1,4 @@
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
+import { provideHttpClient, withInterceptors, withXhr } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 
@@ -20,7 +20,7 @@ function signIn(auth: AuthService, http: HttpTestingController): void {
 function setup(): { auth: AuthService; http: HttpTestingController } {
   TestBed.configureTestingModule({
     providers: [
-      provideHttpClient(withInterceptors([authInterceptor])),
+      provideHttpClient(withXhr(), withInterceptors([authInterceptor])),
       provideHttpClientTesting(),
       {
         provide: ApiBaseService,

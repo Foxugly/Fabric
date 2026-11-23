@@ -38,8 +38,8 @@ Points de cadrage :
 
 Implémenté et vérifié de bout en bout :
 
-- monorepo, backend Django + Channels, agent Python, frontend Angular 21 +
-  **Optimus UI** (`@openng/optimus-ui`, fork MIT de PrimeNG 21 ; PrimeNG ≥ 22,
+- monorepo, backend Django + Channels, agent Python, frontend Angular 22 +
+  **Optimus UI 2** (`@openng/optimus-ui`, fork MIT de PrimeNG 21 ; PrimeNG ≥ 22,
   sous licence commerciale, est interdit dans la flotte — voir
   `STANDARD-frontend-layout.md` « Bibliothèque UI » dans `foxugly-ops`) ;
 - modèles `Agent`, `Command`, `CommandEvent`, `Conversation`, `Message` ;
