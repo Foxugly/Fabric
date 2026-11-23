@@ -1,7 +1,7 @@
 import { bootstrapApplication } from '@angular/platform-browser';
 import { inject, provideAppInitializer, isDevMode } from '@angular/core';
 import { provideTransloco } from '@jsverse/transloco';
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
+import { provideHttpClient, withInterceptors, withXhr } from '@angular/common/http';
 import { provideOptimus } from '@openng/optimus-ui/config';
 import Aura from '@openng/optimus-ui-themes/aura';
 
@@ -47,7 +47,7 @@ globalThis.addEventListener('unhandledrejection', (event: PromiseRejectionEvent)
 
 bootstrapApplication(AppComponent, {
   providers: [
-    provideHttpClient(withInterceptors([authInterceptor])),
+    provideHttpClient(withXhr(), withInterceptors([authInterceptor])),
     // i18n : Transloco, 5 langues, catalogues dans public/i18n/
     // (STANDARD-frontend-layout.md §5 et §5bis). Fabric n'en avait aucun.
     provideTransloco({
