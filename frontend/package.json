@@ -19,7 +19,7 @@
     "@angular/platform-browser": "^22.3.0",
     "@angular/router": "^22.3.0",
     "@jsverse/transloco": "^8.4.0",
-    "@sentry/angular": "^10.78.0",
+    "@sentry/angular": "^11.16.0",
     "rxjs": "^7.8.2",
     "tslib": "^2.9.1",
     "zone.js": "^0.16.2",
@@ -31,8 +31,8 @@
     "@angular/build": "^22.3.0",
     "@angular/cli": "^22.3.0",
     "@angular/compiler-cli": "^22.3.0",
-    "jsdom": "^28.1.0",
+    "jsdom": "^31.0.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.12"
+    "vitest": "^5.1.1"
   }
 }

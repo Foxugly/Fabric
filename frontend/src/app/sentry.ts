@@ -62,7 +62,27 @@ export function initSentry(): boolean {
         release: metaContent('fabric-sentry-release') || undefined,
         // The terminal streams whatever the operator typed and whatever Claude
         // answered. None of that belongs in an error tracker.
-        sendDefaultPii: false,
+        // SDK 11 replaced `sendDefaultPii: false` with `dataCollection`, whose
+        // defaults are MORE permissive (user/IP, cookies, bodies): pin the v10
+        // restrictive baseline explicitly.
+        dataCollection: {
+          userInfo: false,
+          cookies: false,
+          httpHeaders: {
+            request: { deny: ['forwarded', '-ip', 'remote-', 'via', '-user'] },
+            response: { deny: ['forwarded', '-ip', 'remote-', 'via', '-user'] },
+          },
+          httpBodies: [],
+          urlQueryParams: { deny: ['forwarded', '-ip', 'remote-', 'via', '-user'] },
+          genAI: { inputs: false, outputs: false },
+          databaseQueryData: false,
+          queues: false,
+          graphQL: { document: false, variables: false },
+        },
+        // SDK 11 streams spans by default, which ignores `beforeSendTransaction`
+        // (console warning): keep v10's static lifecycle so the scrubber below
+        // still applies.
+        traceLifecycle: 'static',
         tracesSampleRate: 0,
         // Tickets, JWT, Bearer values, request bodies and console breadcrumbs
         // are scrubbed before anything leaves the browser (sentry-scrub.ts).
