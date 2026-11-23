@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 import sentry_sdk
 
-from config.sentry import FILTERED, before_send, init_options, scrub_event
+from config.sentry import FILTERED, before_send, before_send_span, init_options
 
 
 def _event() -> dict[str, Any]:
@@ -93,7 +93,8 @@ def test_sentry_is_initialised_without_pii_or_local_variables() -> None:
     assert "send_default_pii" not in options
     assert options["max_request_body_size"] == "never"
     assert options["before_send"] is before_send
-    assert options["before_send_transaction"] is scrub_event
+    assert options["before_send_span"] is before_send_span
+    assert options["attach_stacktrace"] is False
 
     # What the SDK resolves from it: no PII, no bodies, no local variables,
     # and no deprecation warning.
@@ -111,10 +112,11 @@ def test_sentry_is_initialised_without_pii_or_local_variables() -> None:
     assert resolved["http_bodies"] == []
     assert resolved["stack_frame_variables"] is False
     assert resolved["database_query_data"] is False
+    assert resolved["mcp"] == {"inputs": False, "outputs": False}
 
 
 def test_before_send_keeps_the_sdk_denylist() -> None:
-    # data_collection switches the SDK's EventScrubber off: before_send redoes it.
+    # sentry-sdk 3.0 removed its EventScrubber: before_send redoes it.
     event = before_send({"extra": {"passwd": "x", "credentials": "y", "page": 3}}, {})
     assert event["extra"]["page"] == 3
     for key in ("passwd", "credentials"):

@@ -27,8 +27,7 @@ dependencies = [
   # socket_timeout=None on the channel layer, which makes redis-py 8 safe.
   "redis>=8.2,<9.0",
   "psycopg[binary]>=3.2,<4.0",
-  # hold: sentry-sdk 3.0 is a day-0 major (2026-11-23); migrate after it stabilises — revisit 2026-12-07
-  "sentry-sdk[django]>=2.76,<3",
+  "sentry-sdk>=3.0.0,<4",
   # TOTP secrets are encrypted at rest (Fernet, key derived with HKDF).
   "cryptography>=50.0,<51.0",
   # QR code of the TOTP enrolment, rendered server-side as SVG (pure Python).
