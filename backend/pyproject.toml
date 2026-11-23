@@ -25,9 +25,9 @@ dependencies = [
   # from 127.0.0.1:6379" and every WebSocket died with a 1011 (not RESP3, as first
   # thought: protocol=2 fails the same way). config/settings.py sets
   # socket_timeout=None on the channel layer, which makes redis-py 8 safe.
-  "redis>=8.1,<9.0",
+  "redis>=8.2,<9.0",
   "psycopg[binary]>=3.2,<4.0",
-  "sentry-sdk[django]>=2.0,<3.0",
+  "sentry-sdk[django]>=2.76,<3.0",
   # TOTP secrets are encrypted at rest (Fernet, key derived with HKDF).
   "cryptography>=50.0,<51.0",
   # QR code of the TOTP enrolment, rendered server-side as SVG (pure Python).
