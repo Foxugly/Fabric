@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import importlib
 import json
+import warnings
 from typing import Any
 from unittest.mock import patch
 
 import pytest
+import sentry_sdk
 
-from config.sentry import FILTERED, before_send, init_options
+from config.sentry import FILTERED, before_send, init_options, scrub_event
 
 
 def _event() -> dict[str, Any]:
@@ -88,10 +90,35 @@ def test_sentry_is_initialised_without_pii_or_local_variables() -> None:
         traces_sample_rate=0.0,
     )
 
-    assert options["send_default_pii"] is False
-    assert options["include_local_variables"] is False
+    assert "send_default_pii" not in options
     assert options["max_request_body_size"] == "never"
     assert options["before_send"] is before_send
+    assert options["before_send_transaction"] is scrub_event
+
+    # What the SDK resolves from it: no PII, no bodies, no local variables,
+    # and no deprecation warning.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        client = sentry_sdk.Client(
+            dsn=None,
+            default_integrations=False,
+            data_collection=options["data_collection"],
+        )
+    assert not any("send_default_pii" in str(w.message) for w in caught)
+    resolved = client.options["data_collection"]
+    assert resolved["user_info"] is False
+    assert resolved["cookies"] == {"mode": "off"}
+    assert resolved["http_bodies"] == []
+    assert resolved["stack_frame_variables"] is False
+    assert resolved["database_query_data"] is False
+
+
+def test_before_send_keeps_the_sdk_denylist() -> None:
+    # data_collection switches the SDK's EventScrubber off: before_send redoes it.
+    event = before_send({"extra": {"passwd": "x", "credentials": "y", "page": 3}}, {})
+    assert event["extra"]["page"] == 3
+    for key in ("passwd", "credentials"):
+        assert getattr(event["extra"][key], "value", event["extra"][key]) == FILTERED
 
 
 def test_settings_hand_the_scrubber_to_sentry(
@@ -108,8 +135,8 @@ def test_settings_hand_the_scrubber_to_sentry(
         with patch("sentry_sdk.init") as init:
             importlib.reload(importlib.import_module("config.settings"))
         kwargs = init.call_args.kwargs
-        assert kwargs["include_local_variables"] is False
-        assert kwargs["send_default_pii"] is False
+        assert kwargs["data_collection"]["stack_frame_variables"] is False
+        assert "send_default_pii" not in kwargs
         assert kwargs["before_send"] is before_send
     finally:
         monkeypatch.undo()

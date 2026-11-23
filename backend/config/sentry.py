@@ -8,15 +8,19 @@ What must never reach Sentry from Fabric:
   otherwise embed the frame (`payload`, `result`, `delta`, `input`...), and a
   `Get-Content .env` is exactly that.
 
-Local variables are not captured at all (`include_local_variables=False`), the
-request body is never attached, and this scrubber is the backstop for whatever
-else ends up in headers, `extra`, contexts or breadcrumbs.
+`DATA_COLLECTION` (sentry-sdk 2.76, replaces the deprecated
+`send_default_pii=False`) collects no user, cookies, request bodies or local
+variables. Passing it switches off the SDK's own EventScrubber, so `before_send`
+re-applies it first; this scrubber is then the backstop for whatever else ends
+up in headers, `extra`, contexts or breadcrumbs.
 """
 
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, cast
+
+from sentry_sdk.scrubber import EventScrubber
 
 FILTERED = "[Filtered]"
 
@@ -70,6 +74,33 @@ _QUERY_SECRET = re.compile(
 _BEARER = re.compile(r"(?i)\b(bearer|token)\s+[A-Za-z0-9._~+/=-]{8,}")
 
 
+# Proxy/IP header terms the SDK itself uses when it maps send_default_pii=False.
+_PII_TERMS = ["forwarded", "-ip", "remote-", "via", "-user"]
+
+#: What the SDK may collect: never more than with `send_default_pii=False`.
+DATA_COLLECTION: dict[str, Any] = {
+    "user_info": False,
+    "cookies": {"mode": "off"},
+    "http_headers": {"request": {"mode": "denylist", "terms": _PII_TERMS}},
+    "http_bodies": [],
+    "url_query_params": {"mode": "denylist", "terms": _PII_TERMS},
+    "graphql": {"document": False, "variables": False},
+    "gen_ai": {"inputs": False, "outputs": False},
+    "database_query_data": False,
+    "queues": False,
+    "stack_frame_variables": False,
+    "frame_context_lines": 5,
+}
+
+_SDK_SCRUBBER = EventScrubber(send_default_pii=False)
+
+
+def scrub_event(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any]:
+    """The SDK's denylist scrubbing (`before_send_transaction`)."""
+    _SDK_SCRUBBER.scrub_event(cast(Any, event))  # an Event TypedDict to the SDK
+    return event
+
+
 def _normalise(key: str) -> str:
     return key.lower().replace("-", "_")
 
@@ -105,6 +136,7 @@ def scrub(value: Any) -> Any:
 
 
 def before_send(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any]:
+    scrub_event(event, hint)
     request = event.get("request")
     if isinstance(request, dict):
         request.pop("data", None)
@@ -149,8 +181,8 @@ def init_options(
         "environment": environment,
         "release": release,
         "traces_sample_rate": traces_sample_rate,
-        "send_default_pii": False,
-        "include_local_variables": False,
+        "data_collection": DATA_COLLECTION,
         "max_request_body_size": "never",
         "before_send": before_send,
+        "before_send_transaction": scrub_event,
     }
