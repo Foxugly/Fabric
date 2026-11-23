@@ -30,6 +30,11 @@
 # exigent une majeure. C'est exactement le comportement voulu.
 #
 # (Une premiere version de ce commentaire affirmait l'inverse. C'etait faux.)
+#
+# Depuis le 2026-11-23, primeng/primeicons/@primeuix sont remplaces par Optimus UI
+# (@openng/optimus-ui, @openng/optimus-ui-themes, @openng/icons ; fork MIT de
+# PrimeNG 21, PrimeNG >= 22 est sous licence commerciale). La regle « majeures
+# ignorees » couvre aussi leurs majeures : Optimus 2.x = Angular 22.
 version: 2
 
 updates:
